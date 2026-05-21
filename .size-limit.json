@@ -12,5 +12,19 @@
 			"@anvilkit/core",
 			"@anvilkit/utils"
 		]
+	},
+	{
+		"name": "@anvilkit/plugin-ai-image/mock",
+		"path": "dist/mock/index.js",
+		"limit": "3 KB",
+		"gzip": true,
+		"ignore": [
+			"react",
+			"react-dom",
+			"@puckeditor/core",
+			"@anvilkit/canvas-core",
+			"@anvilkit/core",
+			"@anvilkit/utils"
+		]
 	}
 ]
