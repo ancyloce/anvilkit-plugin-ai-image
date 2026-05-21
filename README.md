@@ -25,9 +25,9 @@ import { createAiImagePlugin } from "@anvilkit/plugin-ai-image";
 import type { AiImageProvider } from "@anvilkit/plugin-ai-image";
 
 const provider: AiImageProvider = async (request, context, options) => {
-	// Call your AI service of choice (Replicate, OpenAI, self-hosted SD, ...).
-	// Honour `options?.signal` for cancellation.
-	throw new Error("provider not implemented");
+  // Call your AI service of choice (Replicate, OpenAI, self-hosted SD, ...).
+  // Honour `options?.signal` for cancellation.
+  throw new Error("provider not implemented");
 };
 
 export const aiImage = createAiImagePlugin({ provider });
