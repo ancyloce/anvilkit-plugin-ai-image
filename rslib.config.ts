@@ -32,6 +32,7 @@ export default defineConfig({
 		externals: [
 			"@anvilkit/canvas-core",
 			"@anvilkit/core",
+			"@anvilkit/ui",
 			"@anvilkit/utils",
 			"@puckeditor/core",
 			"react",
