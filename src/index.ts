@@ -1,4 +1,4 @@
-export { createAiImagePlugin } from "./create-ai-image-plugin.js";
+export { createAiImagePlugin } from "./plugin.js";
 export type {
 	AiImageBgRemoveRequest,
 	AiImageInpaintRequest,
@@ -15,4 +15,4 @@ export type {
 	AiImageVariationRequest,
 	AiLayerBounds,
 	AiLayerContext,
-} from "./types.js";
+} from "./types/index.js";

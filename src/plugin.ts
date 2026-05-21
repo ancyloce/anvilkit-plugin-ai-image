@@ -3,22 +3,16 @@ import type {
 	StudioPluginMeta,
 	StudioPluginRegistration,
 } from "@anvilkit/core/types";
+import config from "../meta/config.json";
 import type {
 	AiImageJobRequest,
 	AiImageJobResult,
 	AiImagePluginInstance,
 	AiImagePluginOptions,
 	AiLayerContext,
-} from "./types.js";
+} from "./types/index.js";
 
-const META: StudioPluginMeta = {
-	id: "@anvilkit/plugin-ai-image",
-	name: "AI Image",
-	version: "0.1.0",
-	coreVersion: "^0.1.0-alpha",
-	description:
-		"AI image generation for the Canvas Studio editor — text-to-image, variation, inpaint, background removal.",
-};
+const META: StudioPluginMeta = config;
 
 function assertValidOptions(opts: AiImagePluginOptions): void {
 	if (typeof opts.provider !== "function") {

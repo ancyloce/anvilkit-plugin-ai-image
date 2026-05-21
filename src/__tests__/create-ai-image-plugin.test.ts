@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createAiImagePlugin } from "../create-ai-image-plugin.js";
-import type { AiImageJobResult, AiImageProvider } from "../types.js";
+import { createAiImagePlugin } from "../plugin.js";
+import type { AiImageJobResult, AiImageProvider } from "../types/index.js";
 
 const noopResult: AiImageJobResult = {
 	jobId: "job-test",
