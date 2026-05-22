@@ -153,12 +153,16 @@ describe("useAiImage", () => {
 	});
 
 	it("reports no layer context and blocks runs when getLayerContext returns null", () => {
+		const run = vi.fn<AiImageJobRunner>();
 		const { result } = renderHook(() =>
-			useAiImage({ run: vi.fn(), getLayerContext: NO_CONTEXT }),
+			useAiImage({ run, getLayerContext: NO_CONTEXT }),
 		);
 		act(() => result.current.onPromptChange("hi"));
 		expect(result.current.hasLayerContext).toBe(false);
 		expect(result.current.canRun).toBe(false);
+		// Even invoked directly, onRun must not submit without a context.
+		act(() => result.current.onRun());
+		expect(run).not.toHaveBeenCalled();
 	});
 
 	it("integrates with a real AiJobClient over the mock provider", async () => {
