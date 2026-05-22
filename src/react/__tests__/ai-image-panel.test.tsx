@@ -192,6 +192,159 @@ describe("useAiImage", () => {
 	});
 });
 
+describe("useAiImage — image.replace commit", () => {
+	const ARTBOARD_WITH_NODE = () => ({
+		artboardId: "art-1",
+		selectedNodeId: "node-1",
+	});
+
+	it("commits image.replace when a variation completes against a selected node", async () => {
+		const run = vi
+			.fn<AiImageJobRunner>()
+			.mockResolvedValue(completeResult("ai-out"));
+		const commit = vi.fn();
+		const { result } = renderHook(() =>
+			useAiImage({ run, getLayerContext: ARTBOARD_WITH_NODE, commit }),
+		);
+		act(() => result.current.onOpChange("variation"));
+		act(() => result.current.onSourceAssetIdChange("src-1"));
+
+		await act(async () => {
+			result.current.onRun();
+		});
+		await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
+
+		expect(commit.mock.calls[0]?.[0]).toEqual({
+			type: "image.replace",
+			nodeId: "node-1",
+			fromAssetId: "src-1",
+			toAssetId: "ai-out",
+		});
+		expect(result.current.error).toBeNull();
+	});
+
+	it("does not commit for a text-to-image result (no node to replace)", async () => {
+		const run = vi
+			.fn<AiImageJobRunner>()
+			.mockResolvedValue(completeResult("ai-out"));
+		const commit = vi.fn();
+		const { result } = renderHook(() =>
+			useAiImage({ run, getLayerContext: ARTBOARD_WITH_NODE, commit }),
+		);
+		act(() => result.current.onPromptChange("a cat"));
+
+		await act(async () => {
+			result.current.onRun();
+		});
+		await waitFor(() =>
+			expect(result.current.result?.resultAssetId).toBe("ai-out"),
+		);
+		expect(commit).not.toHaveBeenCalled();
+	});
+
+	it("commits the post-processed asset id when postProcess is provided", async () => {
+		const run = vi
+			.fn<AiImageJobRunner>()
+			.mockResolvedValue(completeResult("raw"));
+		const commit = vi.fn();
+		const postProcess = vi.fn().mockResolvedValue("processed");
+		const { result } = renderHook(() =>
+			useAiImage({
+				run,
+				getLayerContext: ARTBOARD_WITH_NODE,
+				commit,
+				postProcess,
+			}),
+		);
+		act(() => result.current.onOpChange("bg-remove"));
+		act(() => result.current.onSourceAssetIdChange("src-9"));
+
+		await act(async () => {
+			result.current.onRun();
+		});
+		await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
+
+		expect(postProcess).toHaveBeenCalledTimes(1);
+		expect(commit.mock.calls[0]?.[0]).toEqual({
+			type: "image.replace",
+			nodeId: "node-1",
+			fromAssetId: "src-9",
+			toAssetId: "processed",
+		});
+	});
+
+	it("commits image.replace when an upscale completes against a selected node", async () => {
+		const run = vi
+			.fn<AiImageJobRunner>()
+			.mockResolvedValue(completeResult("ai-out"));
+		const commit = vi.fn();
+		const { result } = renderHook(() =>
+			useAiImage({ run, getLayerContext: ARTBOARD_WITH_NODE, commit }),
+		);
+		act(() => result.current.onOpChange("upscale"));
+		expect(result.current.canRun).toBe(false);
+		act(() => result.current.onSourceAssetIdChange("src-7"));
+		expect(result.current.canRun).toBe(true);
+
+		await act(async () => {
+			result.current.onRun();
+		});
+		await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
+
+		expect(run.mock.calls[0]?.[0]).toEqual({
+			kind: "upscale",
+			sourceAssetId: "src-7",
+		});
+		expect(commit.mock.calls[0]?.[0]).toEqual({
+			type: "image.replace",
+			nodeId: "node-1",
+			fromAssetId: "src-7",
+			toAssetId: "ai-out",
+		});
+		expect(result.current.error).toBeNull();
+	});
+
+	it("does not commit when no node is selected", async () => {
+		const run = vi
+			.fn<AiImageJobRunner>()
+			.mockResolvedValue(completeResult("ai-out"));
+		const commit = vi.fn();
+		const { result } = renderHook(() =>
+			useAiImage({ run, getLayerContext: ARTBOARD, commit }),
+		);
+		act(() => result.current.onOpChange("variation"));
+		act(() => result.current.onSourceAssetIdChange("src-1"));
+
+		await act(async () => {
+			result.current.onRun();
+		});
+		await waitFor(() =>
+			expect(result.current.result?.resultAssetId).toBe("ai-out"),
+		);
+		expect(commit).not.toHaveBeenCalled();
+	});
+
+	it("surfaces a commit failure as an error", async () => {
+		const run = vi
+			.fn<AiImageJobRunner>()
+			.mockResolvedValue(completeResult("ai-out"));
+		const commit = vi.fn(() => {
+			throw new Error("commit boom");
+		});
+		const { result } = renderHook(() =>
+			useAiImage({ run, getLayerContext: ARTBOARD_WITH_NODE, commit }),
+		);
+		act(() => result.current.onOpChange("variation"));
+		act(() => result.current.onSourceAssetIdChange("src-1"));
+
+		await act(async () => {
+			result.current.onRun();
+		});
+		await waitFor(() => expect(result.current.error).toBe("commit boom"));
+		expect(result.current.status).toBe("idle");
+	});
+});
+
 describe("AiImagePanel", () => {
 	it("renders the op selector and disables Run until the prompt is filled", () => {
 		render(

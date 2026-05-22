@@ -2,12 +2,13 @@
 
 import type { CSSProperties, ReactElement } from "react";
 
+import type { CommitCanvasCommandFn } from "../commit/index.js";
 import type {
 	AiImageJobKind,
 	AiJobClient,
 	AiLayerContext,
 } from "../types/index.js";
-import { useAiImage } from "./use-ai-image.js";
+import { type UseAiImageOptions, useAiImage } from "./use-ai-image.js";
 
 /** Op order in the selector — text-to-image is first-class. */
 const OP_ORDER: readonly AiImageJobKind[] = [
@@ -15,6 +16,7 @@ const OP_ORDER: readonly AiImageJobKind[] = [
 	"variation",
 	"inpaint",
 	"bg-remove",
+	"upscale",
 ];
 
 const DEFAULT_OP_LABELS: Record<AiImageJobKind, string> = {
@@ -22,6 +24,7 @@ const DEFAULT_OP_LABELS: Record<AiImageJobKind, string> = {
 	variation: "Variation",
 	inpaint: "Inpaint",
 	"bg-remove": "Remove background",
+	upscale: "Upscale",
 };
 
 export interface AiImagePanelProps {
@@ -38,6 +41,16 @@ export interface AiImagePanelProps {
 	readonly getLayerContext: () => AiLayerContext | null;
 	/** Op selected on first render. Defaults to `"text-to-image"`. */
 	readonly defaultOp?: AiImageJobKind;
+	/**
+	 * Optional — forwarded to {@link useAiImage}. Commits an `image.replace`
+	 * when a non-`text-to-image` job completes against the selected node.
+	 */
+	readonly commit?: CommitCanvasCommandFn;
+	/**
+	 * Optional — forwarded to {@link useAiImage}. Transforms a completed result
+	 * into the final asset id to commit (e.g. via `createPostProcessPipeline`).
+	 */
+	readonly postProcess?: UseAiImageOptions["postProcess"];
 	// Injected i18n copy (English defaults). This external plugin does not
 	// consume core's `studio.module.*` i18n store.
 	readonly title?: string;
@@ -174,6 +187,8 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 		jobClient,
 		getLayerContext,
 		defaultOp,
+		commit,
+		postProcess,
 		title = "AI Image",
 		promptPlaceholder = "Describe the image to generate…",
 		runLabel = "Generate",
@@ -188,6 +203,8 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 			jobClient.run(request, context, options),
 		getLayerContext,
 		defaultOp,
+		commit,
+		postProcess,
 	});
 
 	const labelFor = (kind: AiImageJobKind): string =>
@@ -197,7 +214,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 	const showNegativePrompt = ai.op === "text-to-image";
 	const showSource = ai.op !== "text-to-image";
 	const showMask = ai.op === "inpaint";
-	const showSeed = ai.op !== "bg-remove";
+	const showSeed = ai.op !== "bg-remove" && ai.op !== "upscale";
 
 	return (
 		<div

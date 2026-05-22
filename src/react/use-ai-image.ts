@@ -2,6 +2,8 @@
 
 import { useCallback, useRef, useState } from "react";
 
+import { commitImageReplace } from "../commit/index.js";
+import type { CommitCanvasCommandFn } from "../commit/index.js";
 import type {
 	AiImageJobKind,
 	AiImageJobRequest,
@@ -42,6 +44,25 @@ export interface UseAiImageOptions {
 	readonly getLayerContext: () => AiLayerContext | null;
 	/** Op selected on first render. Defaults to `"text-to-image"`. */
 	readonly defaultOp?: AiImageJobKind;
+	/**
+	 * Optional. When a non-`text-to-image` job completes against the selected
+	 * node, commit an `image.replace` through the host's history store. Injected
+	 * because this package must not depend on `@anvilkit/canvas-editor`; wire it
+	 * to e.g. `(cmd) => historyStore.getState().commit(currentIr, cmd)`. When
+	 * omitted, results are surfaced but never committed (unchanged behavior).
+	 */
+	readonly commit?: CommitCanvasCommandFn;
+	/**
+	 * Optional. Transform a completed result into the final asset id to commit —
+	 * e.g. run `createPostProcessPipeline` (validate / compress / thumbnail /
+	 * register) and return the registered asset id. When omitted, the provider's
+	 * `resultAssetId` is committed as-is.
+	 */
+	readonly postProcess?: (
+		result: AiImageJobResult,
+		request: AiImageJobRequest,
+		context: AiLayerContext,
+	) => Promise<string>;
 }
 
 export interface UseAiImageResult {
@@ -143,6 +164,28 @@ function buildRequest(
 			}
 			return { kind: "bg-remove", sourceAssetId: source };
 		}
+		case "upscale": {
+			if (source === "") {
+				return null;
+			}
+			return { kind: "upscale", sourceAssetId: source };
+		}
+		default:
+			return null;
+	}
+}
+
+/**
+ * The asset a job operates on, or `null` for `text-to-image` (which has no
+ * existing node to replace — placement is the editor's concern).
+ */
+function requestSourceAssetId(request: AiImageJobRequest): string | null {
+	switch (request.kind) {
+		case "variation":
+		case "inpaint":
+		case "bg-remove":
+		case "upscale":
+			return request.sourceAssetId;
 		default:
 			return null;
 	}
@@ -158,7 +201,13 @@ function buildRequest(
  * `.then/.catch/.finally` shape of `useAiCopilot`.
  */
 export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
-	const { run, getLayerContext, defaultOp = "text-to-image" } = options;
+	const {
+		run,
+		getLayerContext,
+		defaultOp = "text-to-image",
+		commit,
+		postProcess,
+	} = options;
 
 	const [op, setOp] = useState<AiImageJobKind>(defaultOp);
 	const [prompt, setPrompt] = useState("");
@@ -184,6 +233,8 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		seed,
 		run,
 		getLayerContext,
+		commit,
+		postProcess,
 	});
 	latest.current = {
 		op,
@@ -194,6 +245,8 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		seed,
 		run,
 		getLayerContext,
+		commit,
+		postProcess,
 	};
 
 	// Resolve the layer context defensively: a host may inject a getter
@@ -250,7 +303,7 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 
 		snapshot
 			.run(request, context, { signal: controller.signal })
-			.then((next) => {
+			.then(async (next) => {
 				if (abortRef.current !== controller) {
 					return;
 				}
@@ -261,6 +314,41 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 				setResult(next);
 				if (next.status === "error") {
 					setError(next.error?.message ?? "AI image job failed.");
+					return;
+				}
+
+				// Opt-in round-trip: for ops that target an existing node, commit
+				// an `image.replace` swapping its asset for the (optionally
+				// post-processed) result. No-op unless the host injected `commit`
+				// and the layer context names a selected node.
+				if (next.status !== "complete" || !next.resultAssetId) {
+					return;
+				}
+				const commitFn = snapshot.commit;
+				const sourceAssetId = requestSourceAssetId(request);
+				const nodeId = context.selectedNodeId;
+				if (!commitFn || sourceAssetId === null || !nodeId) {
+					return;
+				}
+				try {
+					let toAssetId = next.resultAssetId;
+					if (snapshot.postProcess) {
+						toAssetId = await snapshot.postProcess(next, request, context);
+						if (abortRef.current !== controller) {
+							return;
+						}
+					}
+					await commitImageReplace({
+						commit: commitFn,
+						nodeId,
+						fromAssetId: sourceAssetId,
+						toAssetId,
+					});
+				} catch (err) {
+					if (abortRef.current !== controller) {
+						return;
+					}
+					setError(err instanceof Error ? err.message : String(err));
 				}
 			})
 			.catch((err: unknown) => {
