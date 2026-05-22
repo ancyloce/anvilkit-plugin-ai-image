@@ -36,6 +36,16 @@
 				"types": "./dist/react/index.d.cts",
 				"default": "./dist/react/index.cjs"
 			}
+		},
+		"./mask": {
+			"import": {
+				"types": "./dist/mask/index.d.ts",
+				"default": "./dist/mask/index.js"
+			},
+			"require": {
+				"types": "./dist/mask/index.d.cts",
+				"default": "./dist/mask/index.cjs"
+			}
 		}
 	},
 	"files": [
@@ -50,8 +60,10 @@
 	"peerDependencies": {
 		"@anvilkit/ui": "workspace:*",
 		"@puckeditor/core": "^0.21.2",
+		"konva": "^9 || ^10",
 		"react": "^18.2.0 || ^19.0.0",
-		"react-dom": "^18.2.0 || ^19.0.0"
+		"react-dom": "^18.2.0 || ^19.0.0",
+		"react-konva": "^19"
 	},
 	"peerDependenciesMeta": {
 		"@anvilkit/ui": {
@@ -65,12 +77,19 @@
 		},
 		"@puckeditor/core": {
 			"optional": false
+		},
+		"konva": {
+			"optional": true
+		},
+		"react-konva": {
+			"optional": true
 		}
 	},
 	"dependencies": {
 		"@anvilkit/canvas-core": "workspace:*",
 		"@anvilkit/core": "workspace:*",
-		"@anvilkit/utils": "workspace:*"
+		"@anvilkit/utils": "workspace:*",
+		"lucide-react": "^1.16.0"
 	},
 	"scripts": {
 		"build": "rslib build",
@@ -97,9 +116,11 @@
 		"@types/react": "19.2.14",
 		"@types/react-dom": "19.2.3",
 		"jsdom": "^29.1.1",
+		"konva": "^10.3.0",
 		"publint": "^0.3.21",
 		"react": "^19.2.6",
 		"react-dom": "^19.2.6",
+		"react-konva": "^19.2.4",
 		"typescript": "6.0.3",
 		"vitest": "^4.1.7"
 	}

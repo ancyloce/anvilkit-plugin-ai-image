@@ -2,7 +2,7 @@
 	{
 		"name": "@anvilkit/plugin-ai-image",
 		"path": "dist/index.js",
-		"limit": "3 KB",
+		"limit": "4 KB",
 		"gzip": true,
 		"ignore": [
 			"react",
@@ -21,6 +21,22 @@
 		"ignore": [
 			"react",
 			"react-dom",
+			"@puckeditor/core",
+			"@anvilkit/canvas-core",
+			"@anvilkit/core",
+			"@anvilkit/utils"
+		]
+	},
+	{
+		"name": "@anvilkit/plugin-ai-image/mask",
+		"path": "dist/mask/index.js",
+		"limit": "4 KB",
+		"gzip": true,
+		"ignore": [
+			"react",
+			"react-dom",
+			"react-konva",
+			"konva",
 			"@puckeditor/core",
 			"@anvilkit/canvas-core",
 			"@anvilkit/core",
