@@ -5,8 +5,17 @@
  *
  * The package's `.` entry stays headless; this optional subpath ships
  * the AI image sidebar surface (`AiImagePanel`, `useAiImage`) and the
- * self-registering `createAiImageSidebarPlugin` helper. Populated by the
- * I1-6 panel tasks.
+ * self-registering `createAiImageSidebarPlugin` helper.
  */
 
-export {};
+export { AiImagePanel, type AiImagePanelProps } from "./ai-image-panel.js";
+export {
+	type CreateAiImageSidebarPluginOptions,
+	createAiImageSidebarPlugin,
+} from "./create-ai-image-sidebar-plugin.js";
+export {
+	type AiImageJobRunner,
+	type UseAiImageOptions,
+	type UseAiImageResult,
+	useAiImage,
+} from "./use-ai-image.js";
