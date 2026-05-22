@@ -1,5 +1,22 @@
 export { createAiImagePlugin } from "./plugin.js";
 export { createAiJobClient, RetryableError } from "./job/index.js";
+export {
+	createMaskToAssetExporter,
+	dataUrlToFile,
+	drawMask,
+	rasterizeMaskToDataUrl,
+} from "./mask/exporter.js";
+export type {
+	CanvasFactory,
+	DrawMaskOptions,
+	MaskCanvas,
+	MaskToAssetExporter,
+	MaskToAssetExporterOptions,
+	MaskUpload,
+	MaskUploadResult,
+	RasterizeMaskInput,
+} from "./mask/exporter.js";
+export type { MaskDimensions, MaskStroke } from "./mask/types.js";
 export type {
 	AiJobClient,
 	AiJobClientOptions,

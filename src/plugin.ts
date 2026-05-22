@@ -3,6 +3,9 @@ import type {
 	StudioPluginMeta,
 	StudioPluginRegistration,
 } from "@anvilkit/core/types";
+import { ImagePlus } from "lucide-react";
+import { createElement } from "react";
+
 import config from "../meta/config.json";
 import type {
 	AiImageJobRequest,
@@ -12,7 +15,10 @@ import type {
 	AiLayerContext,
 } from "./types/index.js";
 
-const META: StudioPluginMeta = config;
+const META: StudioPluginMeta = {
+	...config,
+	icon: createElement(ImagePlus),
+};
 
 function assertValidOptions(opts: AiImagePluginOptions): void {
 	if (typeof opts.provider !== "function") {
