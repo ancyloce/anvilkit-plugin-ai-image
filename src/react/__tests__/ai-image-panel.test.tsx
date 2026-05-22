@@ -110,16 +110,27 @@ describe("useAiImage", () => {
 	});
 
 	it("treats a resolve-with-cancelled result as a cancel", async () => {
-		const run = vi
-			.fn<AiImageJobRunner>()
-			.mockResolvedValue({ jobId: "j", status: "cancelled", startedAt: 0 });
+		// Deferred so we can assert the run actually started (pending) before
+		// it settles — otherwise a no-op onRun would pass against the
+		// already-idle/null initial state.
+		let resolveRun: ((r: AiImageJobResult) => void) | undefined;
+		const run = vi.fn<AiImageJobRunner>(
+			() =>
+				new Promise<AiImageJobResult>((resolve) => {
+					resolveRun = resolve;
+				}),
+		);
 		const { result } = renderHook(() =>
 			useAiImage({ run, getLayerContext: ARTBOARD }),
 		);
 		act(() => result.current.onPromptChange("x"));
 
+		act(() => result.current.onRun());
+		expect(run).toHaveBeenCalledTimes(1);
+		expect(result.current.status).toBe("pending");
+
 		await act(async () => {
-			result.current.onRun();
+			resolveRun?.({ jobId: "j", status: "cancelled", startedAt: 0 });
 		});
 		await waitFor(() => expect(result.current.status).toBe("idle"));
 		expect(result.current.result).toBeNull();
