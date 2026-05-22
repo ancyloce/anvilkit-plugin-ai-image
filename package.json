@@ -46,6 +46,26 @@
 				"types": "./dist/mask/index.d.cts",
 				"default": "./dist/mask/index.cjs"
 			}
+		},
+		"./post-process": {
+			"import": {
+				"types": "./dist/post-process/index.d.ts",
+				"default": "./dist/post-process/index.js"
+			},
+			"require": {
+				"types": "./dist/post-process/index.d.cts",
+				"default": "./dist/post-process/index.cjs"
+			}
+		},
+		"./commit": {
+			"import": {
+				"types": "./dist/commit/index.d.ts",
+				"default": "./dist/commit/index.js"
+			},
+			"require": {
+				"types": "./dist/commit/index.d.cts",
+				"default": "./dist/commit/index.cjs"
+			}
 		}
 	},
 	"files": [

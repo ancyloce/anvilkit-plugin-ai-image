@@ -42,5 +42,33 @@
 			"@anvilkit/core",
 			"@anvilkit/utils"
 		]
+	},
+	{
+		"name": "@anvilkit/plugin-ai-image/post-process",
+		"path": "dist/post-process/index.js",
+		"limit": "3 KB",
+		"gzip": true,
+		"ignore": [
+			"react",
+			"react-dom",
+			"@puckeditor/core",
+			"@anvilkit/canvas-core",
+			"@anvilkit/core",
+			"@anvilkit/utils"
+		]
+	},
+	{
+		"name": "@anvilkit/plugin-ai-image/commit",
+		"path": "dist/commit/index.js",
+		"limit": "1 KB",
+		"gzip": true,
+		"ignore": [
+			"react",
+			"react-dom",
+			"@puckeditor/core",
+			"@anvilkit/canvas-core",
+			"@anvilkit/core",
+			"@anvilkit/utils"
+		]
 	}
 ]
