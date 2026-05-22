@@ -15,6 +15,7 @@ const requests: readonly AiImageJobRequest[] = [
 		prompt: "x",
 	},
 	{ kind: "bg-remove", sourceAssetId: "src-1" },
+	{ kind: "upscale", sourceAssetId: "src-1" },
 ];
 
 describe("createMockAiImageProvider", () => {
