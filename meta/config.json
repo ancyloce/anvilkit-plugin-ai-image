@@ -1,7 +1,7 @@
 {
 	"id": "@anvilkit/plugin-ai-image",
 	"name": "AI Image",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"coreVersion": "^0.1.0-alpha",
 	"description": "AI image generation for the Canvas Studio editor — text-to-image, variation, inpaint, background removal.",
 	"capabilities": { "sidebar": true }
