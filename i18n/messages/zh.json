@@ -1,0 +1,21 @@
+{
+	"aiImage.op.text-to-image": "文生图",
+	"aiImage.op.variation": "变体",
+	"aiImage.op.inpaint": "局部重绘",
+	"aiImage.op.bg-remove": "移除背景",
+	"aiImage.op.upscale": "放大",
+	"aiImage.panel.title": "AI 图像",
+	"aiImage.panel.promptPlaceholder": "描述要生成的图像…",
+	"aiImage.panel.run": "生成",
+	"aiImage.panel.cancel": "取消",
+	"aiImage.panel.noContext": "选择一个画板以运行 AI 图像工具。",
+	"aiImage.field.prompt": "提示词",
+	"aiImage.field.negativePrompt": "反向提示词",
+	"aiImage.field.sourceAssetId": "源素材 ID",
+	"aiImage.field.maskAssetId": "蒙版素材 ID",
+	"aiImage.field.seed": "种子（可选）",
+	"aiImage.status.generating": "生成中…",
+	"aiImage.result.prefix": "结果素材：",
+	"aiImage.error.noContext": "没有可运行的活动画板或选区。",
+	"aiImage.error.jobFailed": "AI 图像任务失败。"
+}

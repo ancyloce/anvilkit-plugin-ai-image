@@ -1,9 +1,9 @@
 "use client";
 
+import { useMsg } from "@anvilkit/core/i18n";
 import { useCallback, useRef, useState } from "react";
-
-import { commitImageReplace } from "../commit/index.js";
 import type { CommitCanvasCommandFn } from "../commit/index.js";
+import { commitImageReplace } from "../commit/index.js";
 import type {
 	AiImageJobKind,
 	AiImageJobRequest,
@@ -272,6 +272,12 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 			seed,
 		}) !== null;
 
+	// `onRun` keeps stable `[]` deps via the `latest` ref; the msg resolver
+	// rides along in a ref so error fallbacks localize without re-creating it.
+	const msg = useMsg();
+	const msgRef = useRef(msg);
+	msgRef.current = msg;
+
 	const onCancel = useCallback((): void => {
 		abortRef.current?.abort();
 	}, []);
@@ -284,7 +290,7 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		}
 		const context = safeLayerContext();
 		if (context === null) {
-			setError("No active artboard or selection to run against.");
+			setError(msgRef.current("aiImage.error.noContext"));
 			return;
 		}
 
@@ -313,7 +319,9 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 				}
 				setResult(next);
 				if (next.status === "error") {
-					setError(next.error?.message ?? "AI image job failed.");
+					setError(
+						next.error?.message ?? msgRef.current("aiImage.error.jobFailed"),
+					);
 					return;
 				}
 

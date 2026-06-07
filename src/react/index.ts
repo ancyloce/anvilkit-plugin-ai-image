@@ -8,6 +8,7 @@
  * self-registering `createAiImageSidebarPlugin` helper.
  */
 
+export { AiImageI18nProvider } from "../i18n/provider.js";
 export { AiImagePanel, type AiImagePanelProps } from "./ai-image-panel.js";
 export {
 	type CreateAiImageSidebarPluginOptions,

@@ -1,0 +1,21 @@
+{
+	"aiImage.op.text-to-image": "Text to image",
+	"aiImage.op.variation": "Variation",
+	"aiImage.op.inpaint": "Inpaint",
+	"aiImage.op.bg-remove": "Remove background",
+	"aiImage.op.upscale": "Upscale",
+	"aiImage.panel.title": "AI Image",
+	"aiImage.panel.promptPlaceholder": "Describe the image to generate…",
+	"aiImage.panel.run": "Generate",
+	"aiImage.panel.cancel": "Cancel",
+	"aiImage.panel.noContext": "Select an artboard to run AI image tools.",
+	"aiImage.field.prompt": "Prompt",
+	"aiImage.field.negativePrompt": "Negative prompt",
+	"aiImage.field.sourceAssetId": "Source asset id",
+	"aiImage.field.maskAssetId": "Mask asset id",
+	"aiImage.field.seed": "Seed (optional)",
+	"aiImage.status.generating": "Generating…",
+	"aiImage.result.prefix": "Result asset: ",
+	"aiImage.error.noContext": "No active artboard or selection to run against.",
+	"aiImage.error.jobFailed": "AI image job failed."
+}

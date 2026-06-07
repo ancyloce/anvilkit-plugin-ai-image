@@ -7,6 +7,7 @@ import type {
 	StudioSidebarUnregister,
 } from "@anvilkit/core/types";
 
+import { AI_IMAGE_ENTRY } from "../i18n/entry.js";
 import type {
 	AiImageJobKind,
 	AiJobClient,
@@ -83,7 +84,14 @@ export function createAiImageSidebarPlugin(
 
 	return {
 		meta,
-		register() {
+		register(ctx) {
+			// Contribute the `aiImage` catalog at compile time so the panel
+			// resolves `useMsg("aiImage.*")` in-chrome (defaults; the `labels`
+			// prop still overrides). The live <Studio> ctx always provides
+			// `registerMessages`; the guard tolerates minimal test contexts.
+			if (typeof ctx.registerMessages === "function") {
+				ctx.registerMessages(AI_IMAGE_ENTRY);
+			}
 			let unregister: StudioSidebarUnregister | null = null;
 			return {
 				meta,

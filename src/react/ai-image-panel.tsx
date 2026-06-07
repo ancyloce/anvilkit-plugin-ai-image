@@ -1,5 +1,6 @@
 "use client";
 
+import { useMsg } from "@anvilkit/core/i18n";
 import type { CSSProperties, ReactElement } from "react";
 
 import type { CommitCanvasCommandFn } from "../commit/index.js";
@@ -189,14 +190,23 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 		defaultOp,
 		commit,
 		postProcess,
-		title = "AI Image",
-		promptPlaceholder = "Describe the image to generate…",
-		runLabel = "Generate",
-		cancelLabel = "Cancel",
+		title,
+		promptPlaceholder,
+		runLabel,
+		cancelLabel,
 		opLabels,
-		noContextLabel = "Select an artboard to run AI image tools.",
+		noContextLabel,
 		className,
 	} = props;
+
+	const msg = useMsg();
+	// Localizable defaults from the `aiImage.*` catalog; host props still win.
+	const titleText = title ?? msg("aiImage.panel.title");
+	const promptPlaceholderText =
+		promptPlaceholder ?? msg("aiImage.panel.promptPlaceholder");
+	const runLabelText = runLabel ?? msg("aiImage.panel.run");
+	const cancelLabelText = cancelLabel ?? msg("aiImage.panel.cancel");
+	const noContextLabelText = noContextLabel ?? msg("aiImage.panel.noContext");
 
 	const ai = useAiImage({
 		run: (request, context, options) =>
@@ -208,7 +218,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 	});
 
 	const labelFor = (kind: AiImageJobKind): string =>
-		opLabels?.[kind] ?? DEFAULT_OP_LABELS[kind];
+		opLabels?.[kind] ?? msg(`aiImage.op.${kind}`, DEFAULT_OP_LABELS[kind]);
 
 	const showPrompt = ai.op === "text-to-image" || ai.op === "inpaint";
 	const showNegativePrompt = ai.op === "text-to-image";
@@ -224,7 +234,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 		>
 			<div
 				role="group"
-				aria-label={title}
+				aria-label={titleText}
 				style={opListStyle}
 				data-testid="ai-image-op-list"
 			>
@@ -245,11 +255,11 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 			<div style={bodyStyle}>
 				{showPrompt ? (
 					<label style={labelStyle}>
-						Prompt
+						{msg("aiImage.field.prompt")}
 						<textarea
 							data-testid="ai-image-prompt"
 							style={{ ...fieldStyle, minHeight: "64px", resize: "vertical" }}
-							placeholder={promptPlaceholder}
+							placeholder={promptPlaceholderText}
 							value={ai.prompt}
 							onChange={(event) => ai.onPromptChange(event.target.value)}
 						/>
@@ -258,7 +268,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 
 				{showNegativePrompt ? (
 					<label style={labelStyle}>
-						Negative prompt
+						{msg("aiImage.field.negativePrompt")}
 						<input
 							data-testid="ai-image-negative-prompt"
 							style={fieldStyle}
@@ -272,7 +282,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 
 				{showSource ? (
 					<label style={labelStyle}>
-						Source asset id
+						{msg("aiImage.field.sourceAssetId")}
 						<input
 							data-testid="ai-image-source"
 							style={fieldStyle}
@@ -284,7 +294,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 
 				{showMask ? (
 					<label style={labelStyle}>
-						Mask asset id
+						{msg("aiImage.field.maskAssetId")}
 						<input
 							data-testid="ai-image-mask"
 							style={fieldStyle}
@@ -296,7 +306,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 
 				{showSeed ? (
 					<label style={labelStyle}>
-						Seed (optional)
+						{msg("aiImage.field.seed")}
 						<input
 							data-testid="ai-image-seed"
 							inputMode="numeric"
@@ -309,7 +319,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 
 				{!ai.hasLayerContext ? (
 					<p data-testid="ai-image-no-context" style={noticeStyle}>
-						{noContextLabel}
+						{noContextLabelText}
 					</p>
 				) : null}
 
@@ -319,13 +329,14 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 						style={noticeStyle}
 						aria-live="polite"
 					>
-						Generating…
+						{msg("aiImage.status.generating")}
 					</p>
 				) : null}
 
 				{ai.result?.resultAssetId ? (
 					<p data-testid="ai-image-result" style={resultStyle}>
-						Result asset: {ai.result.resultAssetId}
+						{msg("aiImage.result.prefix")}
+						{ai.result.resultAssetId}
 					</p>
 				) : null}
 
@@ -344,7 +355,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 					style={primaryButtonStyle(!ai.canRun)}
 					onClick={ai.onRun}
 				>
-					{runLabel}
+					{runLabelText}
 				</button>
 				{ai.status === "pending" ? (
 					<button
@@ -353,7 +364,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 						style={cancelButtonStyle}
 						onClick={ai.onCancel}
 					>
-						{cancelLabel}
+						{cancelLabelText}
 					</button>
 				) : null}
 			</div>
