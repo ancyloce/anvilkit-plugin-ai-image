@@ -1,0 +1,21 @@
+{
+	"aiImage.op.text-to-image": "テキストから画像",
+	"aiImage.op.variation": "バリエーション",
+	"aiImage.op.inpaint": "インペイント",
+	"aiImage.op.bg-remove": "背景を削除",
+	"aiImage.op.upscale": "アップスケール",
+	"aiImage.panel.title": "AI 画像",
+	"aiImage.panel.promptPlaceholder": "生成する画像を説明してください…",
+	"aiImage.panel.run": "生成",
+	"aiImage.panel.cancel": "キャンセル",
+	"aiImage.panel.noContext": "AI 画像ツールを実行するアートボードを選択してください。",
+	"aiImage.field.prompt": "プロンプト",
+	"aiImage.field.negativePrompt": "ネガティブプロンプト",
+	"aiImage.field.sourceAssetId": "ソースアセット ID",
+	"aiImage.field.maskAssetId": "マスクアセット ID",
+	"aiImage.field.seed": "シード（任意）",
+	"aiImage.status.generating": "生成中…",
+	"aiImage.result.prefix": "結果アセット: ",
+	"aiImage.error.noContext": "実行対象のアクティブなアートボードまたは選択がありません。",
+	"aiImage.error.jobFailed": "AI 画像ジョブが失敗しました。"
+}
