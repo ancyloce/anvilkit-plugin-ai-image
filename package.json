@@ -1,6 +1,6 @@
 {
 	"name": "@anvilkit/plugin-ai-image",
-	"version": "0.1.3",
+	"version": "0.1.4",
 	"description": "AI image generation plugin for AnvilKit Canvas Studio (text-to-image, variation, inpaint, background removal).",
 	"type": "module",
 	"main": "./dist/index.cjs",
