@@ -80,7 +80,7 @@
 	},
 	"peerDependencies": {
 		"@anvilkit/ui": "workspace:*",
-		"@puckeditor/core": "^0.21.2",
+		"@puckeditor/core": "^0.21.3",
 		"konva": "^10",
 		"react": ">=19.0.0",
 		"react-dom": ">=19.0.0",
@@ -128,7 +128,7 @@
 		"@anvilkit/typescript-config": "workspace:*",
 		"@anvilkit/ui": "workspace:*",
 		"@anvilkit/vitest-config": "workspace:*",
-		"@puckeditor/core": "^0.21.2",
+		"@puckeditor/core": "^0.21.3",
 		"@rsbuild/plugin-react": "^2.0.0",
 		"@rslib/core": "^0.22.0",
 		"@testing-library/jest-dom": "^6.9.1",

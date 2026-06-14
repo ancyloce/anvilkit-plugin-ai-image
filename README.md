@@ -28,7 +28,7 @@ pnpm add @anvilkit/plugin-ai-image react react-dom @puckeditor/core
 ```
 
 Peer dependencies: `react >=19.0.0`, `react-dom >=19.0.0`,
-`@puckeditor/core ^0.21.2`, `@anvilkit/ui` (for the React panel), and
+`@puckeditor/core ^0.21.3`, `@anvilkit/ui` (for the React panel), and
 `konva ^9 || ^10` + `react-konva ^19` (for the `./mask` and `./react` Konva
 surfaces). The headless `.` entry — factory, job client, post-process, commit —
 does not require Konva. `@anvilkit/canvas-core` ships as a direct dependency and
