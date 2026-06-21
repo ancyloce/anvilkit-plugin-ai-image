@@ -1,6 +1,6 @@
 # @anvilkit/plugin-ai-image
 
-> **Alpha (`0.1.1`).** API may change before `1.0`. The plugin never talks to an
+> **Alpha (`0.1.4`).** API may change before `1.0`. The plugin never talks to an
 > AI service directly — every job is delegated to a host-supplied
 > `AiImageProvider`, so no credentials, model identifiers, or endpoints cross the
 > plugin boundary.
@@ -29,7 +29,7 @@ pnpm add @anvilkit/plugin-ai-image react react-dom @puckeditor/core
 
 Peer dependencies: `react >=19.0.0`, `react-dom >=19.0.0`,
 `@puckeditor/core ^0.21.3`, `@anvilkit/ui` (for the React panel), and
-`konva ^9 || ^10` + `react-konva ^19` (for the `./mask` and `./react` Konva
+`konva ^10` + `react-konva ^19` (for the `./mask` and `./react` Konva
 surfaces). The headless `.` entry — factory, job client, post-process, commit —
 does not require Konva. `@anvilkit/canvas-core` ships as a direct dependency and
 is the source of truth for the wire-shape types.
