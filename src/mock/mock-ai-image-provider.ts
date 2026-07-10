@@ -13,7 +13,7 @@ import type {
 	AiImageJobResult,
 	AiImageProvider,
 } from "@anvilkit/canvas-core";
-import { RetryableError, defaultSleep } from "../job/retry.js";
+import { defaultSleep, RetryableError } from "../job/retry.js";
 
 export interface CreateMockAiImageProviderOptions {
 	/** Simulated provider latency in ms (abort-aware). @default 0 */

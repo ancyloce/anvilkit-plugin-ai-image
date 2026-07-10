@@ -3,8 +3,8 @@
 import type { AiLayerBounds } from "@anvilkit/canvas-core";
 import type Konva from "konva";
 import { Group, Layer, Line, Rect } from "react-konva";
-import type { MaskPoint } from "./use-mask-strokes.js";
 import type { MaskStroke } from "./types.js";
+import type { MaskPoint } from "./use-mask-strokes.js";
 
 export interface MaskEditorLayerProps {
 	/** World rect of the target image the mask overlays. */

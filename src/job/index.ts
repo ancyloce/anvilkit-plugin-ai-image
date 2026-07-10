@@ -5,4 +5,4 @@ export {
 	type AiJobRunOptions,
 	createAiJobClient,
 } from "./ai-job-client.js";
-export { type RetryOptions, RetryableError, withRetry } from "./retry.js";
+export { RetryableError, type RetryOptions, withRetry } from "./retry.js";

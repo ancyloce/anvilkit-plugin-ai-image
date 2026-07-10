@@ -1,10 +1,3 @@
-export {
-	createPostProcessPipeline,
-	dataUrlToFile,
-	PostProcessError,
-	sourceToFile,
-	thumbnailDimensions,
-} from "./pipeline.js";
 export type {
 	DecodedImage,
 	ImageDecoder,
@@ -20,4 +13,11 @@ export type {
 	ProcessCanvas,
 	ProcessCanvas2D,
 	ProcessCanvasFactory,
+} from "./pipeline.js";
+export {
+	createPostProcessPipeline,
+	dataUrlToFile,
+	PostProcessError,
+	sourceToFile,
+	thumbnailDimensions,
 } from "./pipeline.js";

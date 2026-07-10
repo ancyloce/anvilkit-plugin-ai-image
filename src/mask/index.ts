@@ -2,10 +2,10 @@ export {
 	MaskEditorLayer,
 	type MaskEditorLayerProps,
 } from "./MaskEditorLayer.js";
+export type { MaskDimensions, MaskStroke } from "./types.js";
 export {
 	type MaskPoint,
-	useMaskStrokes,
 	type UseMaskStrokesOptions,
 	type UseMaskStrokesResult,
+	useMaskStrokes,
 } from "./use-mask-strokes.js";
-export type { MaskDimensions, MaskStroke } from "./types.js";

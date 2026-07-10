@@ -1,7 +1,7 @@
 import {
 	applyCommand,
-	type CanvasImageReplaceCommand,
 	type CanvasImageNode,
+	type CanvasImageReplaceCommand,
 	type CanvasIR,
 	createCanvasIR,
 	createGroup,
