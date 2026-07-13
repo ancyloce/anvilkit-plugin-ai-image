@@ -2,22 +2,41 @@
 
 import { useMsg } from "@anvilkit/core/i18n";
 import type { CSSProperties, ReactElement } from "react";
+import { useState } from "react";
 
-import type { CommitCanvasCommandFn } from "../commit/index.js";
 import type {
+	CommitAiDesignCommandFn,
+	CommitCanvasCommandFn,
+} from "../commit/index.js";
+import type {
+	AiDesignJobKind,
+	AiDesignJobRequest,
+	AiDesignJobResult,
 	AiImageJobKind,
 	AiJobClient,
 	AiLayerContext,
+	AiProviderCapabilities,
+	BrandKitDefinition,
 } from "../types/index.js";
+import { useAiDesign } from "./use-ai-design.js";
 import { type UseAiImageOptions, useAiImage } from "./use-ai-image.js";
 
-/** Op order in the selector — text-to-image is first-class. */
+/**
+ * Op order in the selector — text-to-image is first-class. The four
+ * FR-050 (canvas-m4-001) image-editing ops are last, in the order UX-006
+ * names them (remove/replace/expand background, plus fill/erase as the
+ * mask-driven siblings of inpaint).
+ */
 const OP_ORDER: readonly AiImageJobKind[] = [
 	"text-to-image",
 	"variation",
 	"inpaint",
 	"bg-remove",
 	"upscale",
+	"generative-fill",
+	"generative-expand",
+	"object-erase",
+	"background-replace",
 ];
 
 const DEFAULT_OP_LABELS: Record<AiImageJobKind, string> = {
@@ -26,6 +45,10 @@ const DEFAULT_OP_LABELS: Record<AiImageJobKind, string> = {
 	inpaint: "Inpaint",
 	"bg-remove": "Remove background",
 	upscale: "Upscale",
+	"generative-fill": "Generative fill",
+	"generative-expand": "Generative expand",
+	"object-erase": "Erase object",
+	"background-replace": "Replace background",
 };
 
 export interface AiImagePanelProps {
@@ -40,6 +63,13 @@ export interface AiImagePanelProps {
 	 * not depend on `@anvilkit/canvas-editor`.
 	 */
 	readonly getLayerContext: () => AiLayerContext | null;
+	/**
+	 * Which ops the host's provider actually supports (FR-051,
+	 * canvas-m4-002). When set, the op selector only shows ops in
+	 * `capabilities.imageOps`; omitted keeps the pre-M4 behavior of showing
+	 * every built-in op regardless of provider support.
+	 */
+	readonly capabilities?: AiProviderCapabilities;
 	/** Op selected on first render. Defaults to `"text-to-image"`. */
 	readonly defaultOp?: AiImageJobKind;
 	/**
@@ -52,6 +82,20 @@ export interface AiImagePanelProps {
 	 * into the final asset id to commit (e.g. via `createPostProcessPipeline`).
 	 */
 	readonly postProcess?: UseAiImageOptions["postProcess"];
+	/**
+	 * Drives the FR-053 (canvas-m4-004) design actions — rewrite selected
+	 * text, generate layout variants, apply brand kit via AI. Omitted hides
+	 * the whole design-actions section (pre-M4 hosts see unchanged behavior).
+	 */
+	readonly designJobClient?: AiJobClient<
+		AiDesignJobRequest,
+		AiDesignJobResult,
+		AiLayerContext
+	>;
+	/** Validates then commits a completed design job's result (canvas-m4-003's bridge). */
+	readonly designCommit?: CommitAiDesignCommandFn;
+	/** Required for the "apply brand kit via AI" action; omitted hides that one action. */
+	readonly brandKit?: BrandKitDefinition;
 	// Injected i18n copy (English defaults). This external plugin does not
 	// consume core's `studio.module.*` i18n store.
 	readonly title?: string;
@@ -187,9 +231,13 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 	const {
 		jobClient,
 		getLayerContext,
+		capabilities,
 		defaultOp,
 		commit,
 		postProcess,
+		designJobClient,
+		designCommit,
+		brandKit,
 		title,
 		promptPlaceholder,
 		runLabel,
@@ -198,6 +246,13 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 		noContextLabel,
 		className,
 	} = props;
+
+	const visibleOps = capabilities?.imageOps
+		? OP_ORDER.filter((kind) => capabilities.imageOps?.includes(kind))
+		: OP_ORDER;
+
+	const supportsDesignOp = (kind: AiDesignJobKind): boolean =>
+		capabilities?.designOps ? capabilities.designOps.includes(kind) : true;
 
 	const msg = useMsg();
 	// Localizable defaults from the `aiImage.*` catalog; host props still win.
@@ -220,11 +275,56 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 	const labelFor = (kind: AiImageJobKind): string =>
 		opLabels?.[kind] ?? msg(`aiImage.op.${kind}`, DEFAULT_OP_LABELS[kind]);
 
-	const showPrompt = ai.op === "text-to-image" || ai.op === "inpaint";
+	const showPrompt =
+		ai.op === "text-to-image" ||
+		ai.op === "inpaint" ||
+		ai.op === "generative-fill" ||
+		ai.op === "generative-expand" ||
+		ai.op === "background-replace";
 	const showNegativePrompt = ai.op === "text-to-image";
 	const showSource = ai.op !== "text-to-image";
-	const showMask = ai.op === "inpaint";
-	const showSeed = ai.op !== "bg-remove" && ai.op !== "upscale";
+	const showMask =
+		ai.op === "inpaint" ||
+		ai.op === "generative-fill" ||
+		ai.op === "object-erase";
+	const showTargetSize = ai.op === "generative-expand";
+	const showSeed =
+		ai.op !== "bg-remove" &&
+		ai.op !== "upscale" &&
+		ai.op !== "generative-expand" &&
+		ai.op !== "object-erase";
+
+	// Design actions (FR-053, canvas-m4-004). Hooks always run (rules of
+	// hooks); the section itself renders nothing when the host omitted
+	// `designJobClient`.
+	const design = useAiDesign({
+		run: (request, context, options) => {
+			if (!designJobClient) {
+				throw new Error(
+					"AiImagePanel: a design action fired without a designJobClient.",
+				);
+			}
+			return designJobClient.run(request, context, options);
+		},
+		getLayerContext,
+		commit: designCommit,
+	});
+	const [rewriteInstruction, setRewriteInstruction] = useState("");
+	const [layoutVariantCount, setLayoutVariantCount] = useState("");
+
+	const selectedKind = (() => {
+		try {
+			return getLayerContext()?.selectedNodeKind;
+		} catch {
+			return undefined;
+		}
+	})();
+	// Permissive when unknown (no selection info yet), matching the
+	// capabilities-omitted convention elsewhere in this panel.
+	const selectionLooksLikeText =
+		selectedKind === undefined ||
+		selectedKind === "text" ||
+		selectedKind === "rich-text";
 
 	return (
 		<div
@@ -238,7 +338,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 				style={opListStyle}
 				data-testid="ai-image-op-list"
 			>
-				{OP_ORDER.map((kind) => (
+				{visibleOps.map((kind) => (
 					<button
 						key={kind}
 						type="button"
@@ -304,6 +404,33 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 					</label>
 				) : null}
 
+				{showTargetSize ? (
+					<>
+						<label style={labelStyle}>
+							{msg("aiImage.field.targetWidth")}
+							<input
+								data-testid="ai-image-target-width"
+								inputMode="numeric"
+								style={fieldStyle}
+								value={ai.targetWidth}
+								onChange={(event) => ai.onTargetWidthChange(event.target.value)}
+							/>
+						</label>
+						<label style={labelStyle}>
+							{msg("aiImage.field.targetHeight")}
+							<input
+								data-testid="ai-image-target-height"
+								inputMode="numeric"
+								style={fieldStyle}
+								value={ai.targetHeight}
+								onChange={(event) =>
+									ai.onTargetHeightChange(event.target.value)
+								}
+							/>
+						</label>
+					</>
+				) : null}
+
 				{showSeed ? (
 					<label style={labelStyle}>
 						{msg("aiImage.field.seed")}
@@ -333,7 +460,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 					</p>
 				) : null}
 
-				{ai.result?.resultAssetId ? (
+				{ai.result?.status === "complete" ? (
 					<p data-testid="ai-image-result" style={resultStyle}>
 						{msg("aiImage.result.prefix")}
 						{ai.result.resultAssetId}
@@ -368,6 +495,155 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 					</button>
 				) : null}
 			</div>
+
+			{designJobClient ? (
+				<div
+					data-testid="ai-design-actions"
+					style={{
+						...bodyStyle,
+						flex: "none",
+						borderTop: "1px solid var(--ak-studio-border, #d4d4d8)",
+						paddingTop: "8px",
+					}}
+				>
+					{supportsDesignOp("rewrite-copy") && selectionLooksLikeText ? (
+						<div
+							style={{ display: "flex", flexDirection: "column", gap: "4px" }}
+						>
+							<label style={labelStyle}>
+								{msg("aiImage.design.rewriteInstruction")}
+								<input
+									data-testid="ai-design-rewrite-instruction"
+									style={fieldStyle}
+									value={rewriteInstruction}
+									onChange={(event) =>
+										setRewriteInstruction(event.target.value)
+									}
+								/>
+							</label>
+							<button
+								type="button"
+								data-testid="ai-design-rewrite-run"
+								disabled={
+									design.status === "pending" ||
+									!getLayerContext()?.selectedNodeId
+								}
+								style={primaryButtonStyle(
+									design.status === "pending" ||
+										!getLayerContext()?.selectedNodeId,
+								)}
+								onClick={() => {
+									const context = getLayerContext();
+									if (!context?.selectedNodeId) return;
+									design.run({
+										kind: "rewrite-copy",
+										nodeId: context.selectedNodeId,
+										...(rewriteInstruction.trim()
+											? { instruction: rewriteInstruction.trim() }
+											: {}),
+									});
+								}}
+							>
+								{msg("aiImage.design.rewriteRun")}
+							</button>
+						</div>
+					) : null}
+
+					{supportsDesignOp("generate-layout-variants") ? (
+						<div
+							style={{ display: "flex", flexDirection: "column", gap: "4px" }}
+						>
+							<label style={labelStyle}>
+								{msg("aiImage.design.layoutVariantCount")}
+								<input
+									data-testid="ai-design-layout-count"
+									inputMode="numeric"
+									style={fieldStyle}
+									value={layoutVariantCount}
+									onChange={(event) =>
+										setLayoutVariantCount(event.target.value)
+									}
+								/>
+							</label>
+							<button
+								type="button"
+								data-testid="ai-design-layout-run"
+								disabled={design.status === "pending" || !ai.hasLayerContext}
+								style={primaryButtonStyle(
+									design.status === "pending" || !ai.hasLayerContext,
+								)}
+								onClick={() => {
+									const context = getLayerContext();
+									if (!context) return;
+									const count = Number.parseInt(layoutVariantCount, 10);
+									design.run({
+										kind: "generate-layout-variants",
+										sourcePageId: context.artboardId,
+										...(Number.isInteger(count) ? { count } : {}),
+									});
+								}}
+							>
+								{msg("aiImage.design.layoutRun")}
+							</button>
+						</div>
+					) : null}
+
+					{supportsDesignOp("apply-brand") && brandKit ? (
+						<button
+							type="button"
+							data-testid="ai-design-brand-run"
+							disabled={design.status === "pending" || !ai.hasLayerContext}
+							style={primaryButtonStyle(
+								design.status === "pending" || !ai.hasLayerContext,
+							)}
+							onClick={() => {
+								const context = getLayerContext();
+								if (!context) return;
+								design.run({
+									kind: "apply-brand",
+									brandKit,
+									targetPageId: context.artboardId,
+								});
+							}}
+						>
+							{msg("aiImage.design.applyBrandRun")}
+						</button>
+					) : null}
+
+					{design.status === "pending" ? (
+						<p
+							data-testid="ai-design-status"
+							style={noticeStyle}
+							aria-live="polite"
+						>
+							{msg("aiImage.status.generating")}
+						</p>
+					) : null}
+
+					{design.status === "pending" ? (
+						<button
+							type="button"
+							data-testid="ai-design-cancel"
+							style={cancelButtonStyle}
+							onClick={design.onCancel}
+						>
+							{cancelLabelText}
+						</button>
+					) : null}
+
+					{design.result?.status === "complete" ? (
+						<p data-testid="ai-design-result" style={resultStyle}>
+							{msg("aiImage.design.resultApplied")}
+						</p>
+					) : null}
+
+					{design.error ? (
+						<p data-testid="ai-design-error" style={errorStyle} role="alert">
+							{design.error}
+						</p>
+					) : null}
+				</div>
+			) : null}
 		</div>
 	);
 }

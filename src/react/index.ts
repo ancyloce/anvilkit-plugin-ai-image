@@ -15,6 +15,12 @@ export {
 	createAiImageSidebarPlugin,
 } from "./create-ai-image-sidebar-plugin.js";
 export {
+	type AiDesignJobRunner,
+	type UseAiDesignOptions,
+	type UseAiDesignResult,
+	useAiDesign,
+} from "./use-ai-design.js";
+export {
 	type AiImageJobRunner,
 	type UseAiImageOptions,
 	type UseAiImageResult,

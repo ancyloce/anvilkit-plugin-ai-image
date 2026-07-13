@@ -7,11 +7,16 @@ import type {
 	StudioSidebarUnregister,
 } from "@anvilkit/core/types";
 
+import type { CommitAiDesignCommandFn } from "../commit/index.js";
 import { AI_IMAGE_ENTRY } from "../i18n/entry.js";
 import type {
+	AiDesignJobRequest,
+	AiDesignJobResult,
 	AiImageJobKind,
 	AiJobClient,
 	AiLayerContext,
+	AiProviderCapabilities,
+	BrandKitDefinition,
 } from "../types/index.js";
 import { AiImagePanel, type AiImagePanelProps } from "./ai-image-panel.js";
 
@@ -30,8 +35,20 @@ export interface CreateAiImageSidebarPluginOptions {
 	 * and disables Run.
 	 */
 	readonly getLayerContext?: () => AiLayerContext | null;
+	/** Which ops the host's provider supports (FR-051); forwarded to {@link AiImagePanel}. */
+	readonly capabilities?: AiProviderCapabilities;
 	/** Op selected on first render. Defaults to `"text-to-image"`. */
 	readonly defaultOp?: AiImageJobKind;
+	/** Drives the FR-053 design actions (rewrite text, layout variants, apply brand); omitted hides that section. */
+	readonly designJobClient?: AiJobClient<
+		AiDesignJobRequest,
+		AiDesignJobResult,
+		AiLayerContext
+	>;
+	/** Validates then commits a completed design job's result (canvas-m4-003's bridge). */
+	readonly designCommit?: CommitAiDesignCommandFn;
+	/** Required for the "apply brand kit via AI" action; omitted hides that one action. */
+	readonly brandKit?: BrandKitDefinition;
 	/** Injected i18n copy forwarded to {@link AiImagePanel}. */
 	readonly labels?: Pick<
 		AiImagePanelProps,
@@ -76,7 +93,11 @@ export function createAiImageSidebarPlugin(
 			<AiImagePanel
 				jobClient={options.jobClient}
 				getLayerContext={getLayerContext}
+				capabilities={options.capabilities}
 				defaultOp={options.defaultOp}
+				designJobClient={options.designJobClient}
+				designCommit={options.designCommit}
+				brandKit={options.brandKit}
 				{...options.labels}
 			/>
 		),

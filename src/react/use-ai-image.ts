@@ -76,6 +76,11 @@ export interface UseAiImageResult {
 	readonly onSourceAssetIdChange: (next: string) => void;
 	readonly maskAssetId: string;
 	readonly onMaskAssetIdChange: (next: string) => void;
+	/** `generative-expand` only. Kept as raw strings; parsed when the request is built. */
+	readonly targetWidth: string;
+	readonly onTargetWidthChange: (next: string) => void;
+	readonly targetHeight: string;
+	readonly onTargetHeightChange: (next: string) => void;
 	/** Optional seed, kept as a raw string; parsed when the request is built. */
 	readonly seed: string;
 	readonly onSeedChange: (next: string) => void;
@@ -95,6 +100,8 @@ interface AiImageFields {
 	readonly negativePrompt: string;
 	readonly sourceAssetId: string;
 	readonly maskAssetId: string;
+	readonly targetWidth: string;
+	readonly targetHeight: string;
 	readonly seed: string;
 }
 
@@ -108,6 +115,16 @@ function parseSeed(raw: string): number | undefined {
 	// Seeds are conventionally integers; `Number.isInteger` also rejects
 	// NaN / Infinity, so a non-numeric or fractional seed is dropped.
 	return Number.isInteger(value) ? value : undefined;
+}
+
+/** Parse a raw dimension string into a positive integer, or `undefined`. */
+function parseDimension(raw: string): number | undefined {
+	const trimmed = raw.trim();
+	if (trimmed === "") {
+		return undefined;
+	}
+	const value = Number(trimmed);
+	return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 /**
@@ -170,6 +187,49 @@ function buildRequest(
 			}
 			return { kind: "upscale", sourceAssetId: source };
 		}
+		case "generative-fill": {
+			if (source === "" || mask === "" || prompt === "") {
+				return null;
+			}
+			return {
+				kind: "generative-fill",
+				sourceAssetId: source,
+				maskAssetId: mask,
+				prompt,
+				...(seed === undefined ? {} : { seed }),
+			};
+		}
+		case "generative-expand": {
+			const width = parseDimension(fields.targetWidth);
+			const height = parseDimension(fields.targetHeight);
+			if (source === "" || width === undefined || height === undefined) {
+				return null;
+			}
+			return {
+				kind: "generative-expand",
+				sourceAssetId: source,
+				targetWidth: width,
+				targetHeight: height,
+				...(prompt === "" ? {} : { prompt }),
+			};
+		}
+		case "object-erase": {
+			if (source === "" || mask === "") {
+				return null;
+			}
+			return { kind: "object-erase", sourceAssetId: source, maskAssetId: mask };
+		}
+		case "background-replace": {
+			if (source === "" || prompt === "") {
+				return null;
+			}
+			return {
+				kind: "background-replace",
+				sourceAssetId: source,
+				prompt,
+				...(seed === undefined ? {} : { seed }),
+			};
+		}
 		default:
 			return null;
 	}
@@ -185,6 +245,10 @@ function requestSourceAssetId(request: AiImageJobRequest): string | null {
 		case "inpaint":
 		case "bg-remove":
 		case "upscale":
+		case "generative-fill":
+		case "generative-expand":
+		case "object-erase":
+		case "background-replace":
 			return request.sourceAssetId;
 		default:
 			return null;
@@ -214,6 +278,8 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 	const [negativePrompt, setNegativePrompt] = useState("");
 	const [sourceAssetId, setSourceAssetId] = useState("");
 	const [maskAssetId, setMaskAssetId] = useState("");
+	const [targetWidth, setTargetWidth] = useState("");
+	const [targetHeight, setTargetHeight] = useState("");
 	const [seed, setSeed] = useState("");
 	const [status, setStatus] = useState<"idle" | "pending">("idle");
 	const [result, setResult] = useState<AiImageJobResult | null>(null);
@@ -230,6 +296,8 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		negativePrompt,
 		sourceAssetId,
 		maskAssetId,
+		targetWidth,
+		targetHeight,
 		seed,
 		run,
 		getLayerContext,
@@ -242,6 +310,8 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		negativePrompt,
 		sourceAssetId,
 		maskAssetId,
+		targetWidth,
+		targetHeight,
 		seed,
 		run,
 		getLayerContext,
@@ -269,6 +339,8 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 			negativePrompt,
 			sourceAssetId,
 			maskAssetId,
+			targetWidth,
+			targetHeight,
 			seed,
 		}) !== null;
 
@@ -391,6 +463,10 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		onSourceAssetIdChange: setSourceAssetId,
 		maskAssetId,
 		onMaskAssetIdChange: setMaskAssetId,
+		targetWidth,
+		onTargetWidthChange: setTargetWidth,
+		targetHeight,
+		onTargetHeightChange: setTargetHeight,
 		seed,
 		onSeedChange: setSeed,
 		status,

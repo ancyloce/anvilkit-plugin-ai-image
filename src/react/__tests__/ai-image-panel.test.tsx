@@ -19,9 +19,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createAiJobClient } from "../../job/index.js";
 import { createMockAiImageProvider } from "../../mock/index.js";
-import type { AiImageJobResult, AiJobClient } from "../../types/index.js";
+import type {
+	AiDesignJobResult,
+	AiImageJobResult,
+	AiJobClient,
+} from "../../types/index.js";
 import { AiImagePanel } from "../ai-image-panel.js";
 import { createAiImageSidebarPlugin } from "../create-ai-image-sidebar-plugin.js";
+import { type AiDesignJobRunner, useAiDesign } from "../use-ai-design.js";
 import { type AiImageJobRunner, useAiImage } from "../use-ai-image.js";
 
 const ARTBOARD = () => ({ artboardId: "art-1" });
@@ -152,6 +157,34 @@ describe("useAiImage", () => {
 		expect(result.current.canRun).toBe(true);
 	});
 
+	it("gates canRun for the FR-050 image-editing ops (UX-006)", () => {
+		const { result } = renderHook(() =>
+			useAiImage({ run: vi.fn(), getLayerContext: ARTBOARD }),
+		);
+
+		// object-erase needs source + mask, no prompt.
+		act(() => result.current.onOpChange("object-erase"));
+		expect(result.current.canRun).toBe(false);
+		act(() => result.current.onSourceAssetIdChange("src-1"));
+		expect(result.current.canRun).toBe(false);
+		act(() => result.current.onMaskAssetIdChange("mask-1"));
+		expect(result.current.canRun).toBe(true);
+
+		// generative-expand needs source + both target dimensions, no prompt.
+		act(() => result.current.onOpChange("generative-expand"));
+		expect(result.current.canRun).toBe(false);
+		act(() => result.current.onTargetWidthChange("1600"));
+		expect(result.current.canRun).toBe(false);
+		act(() => result.current.onTargetHeightChange("900"));
+		expect(result.current.canRun).toBe(true);
+
+		// background-replace needs source + prompt.
+		act(() => result.current.onOpChange("background-replace"));
+		expect(result.current.canRun).toBe(false);
+		act(() => result.current.onPromptChange("a studio backdrop"));
+		expect(result.current.canRun).toBe(true);
+	});
+
 	it("reports no layer context and blocks runs when getLayerContext returns null", () => {
 		const run = vi.fn<AiImageJobRunner>();
 		const { result } = renderHook(() =>
@@ -189,6 +222,167 @@ describe("useAiImage", () => {
 		await waitFor(() =>
 			expect(result.current.result?.resultAssetId).toBe("mock-asset"),
 		);
+	});
+});
+
+function completeDesignResult(): AiDesignJobResult {
+	return {
+		jobId: "design-job-1",
+		status: "complete",
+		payload: {
+			kind: "command",
+			command: {
+				type: "node.update",
+				nodeId: "headline",
+				kind: "text",
+				patch: { text: "Rewritten" },
+			},
+		},
+		startedAt: 0,
+		finishedAt: 1,
+	};
+}
+
+describe("useAiDesign (FR-053, canvas-m4-004)", () => {
+	it("runs a design request and surfaces the completed result", async () => {
+		const run = vi
+			.fn<AiDesignJobRunner>()
+			.mockResolvedValue(completeDesignResult());
+		const { result } = renderHook(() =>
+			useAiDesign({ run, getLayerContext: ARTBOARD }),
+		);
+
+		await act(async () => {
+			result.current.run({ kind: "rewrite-copy", nodeId: "headline" });
+		});
+		await waitFor(() => expect(result.current.result?.status).toBe("complete"));
+
+		expect(result.current.status).toBe("idle");
+		expect(result.current.error).toBeNull();
+		expect(run).toHaveBeenCalledTimes(1);
+		const [request, context] = run.mock.calls[0] ?? [];
+		expect(request).toEqual({ kind: "rewrite-copy", nodeId: "headline" });
+		expect(context).toEqual({ artboardId: "art-1" });
+	});
+
+	it("validates and commits a completed result through the injected commit", async () => {
+		const run = vi
+			.fn<AiDesignJobRunner>()
+			.mockResolvedValue(completeDesignResult());
+		const commit = vi.fn();
+		const { result } = renderHook(() =>
+			useAiDesign({ run, getLayerContext: ARTBOARD, commit }),
+		);
+
+		await act(async () => {
+			result.current.run({ kind: "rewrite-copy", nodeId: "headline" });
+		});
+		await waitFor(() => expect(result.current.status).toBe("idle"));
+
+		expect(commit).toHaveBeenCalledTimes(1);
+		expect(commit.mock.calls[0]?.[0]).toEqual({
+			type: "batch",
+			commands: [
+				{
+					type: "node.update",
+					nodeId: "headline",
+					kind: "text",
+					patch: { text: "Rewritten" },
+				},
+			],
+		});
+	});
+
+	it("surfaces a quarantined (invalid) result as an error and never calls commit", async () => {
+		const invalidResult: AiDesignJobResult = {
+			jobId: "j1",
+			status: "complete",
+			payload: {
+				kind: "command",
+				command: {
+					type: "node.create",
+					parentId: "root",
+					node: {
+						id: "bad",
+						// biome-ignore lint/suspicious/noExplicitAny: deliberately invalid to prove quarantine
+						type: "made-up-kind" as any,
+						transform: { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 },
+						bounds: { width: 10, height: 10 },
+						zIndex: 0,
+					},
+				},
+			},
+			startedAt: 0,
+			finishedAt: 1,
+		};
+		const run = vi.fn<AiDesignJobRunner>().mockResolvedValue(invalidResult);
+		const commit = vi.fn();
+		const { result } = renderHook(() =>
+			useAiDesign({ run, getLayerContext: ARTBOARD, commit }),
+		);
+
+		await act(async () => {
+			result.current.run({ kind: "rewrite-copy", nodeId: "headline" });
+		});
+		await waitFor(() => expect(result.current.error).not.toBeNull());
+		expect(commit).not.toHaveBeenCalled();
+	});
+
+	it("surfaces a job-level error result", async () => {
+		const errorResult: AiDesignJobResult = {
+			jobId: "j1",
+			status: "error",
+			error: { code: "PROVIDER_TIMEOUT", message: "provider timed out" },
+			startedAt: 0,
+		};
+		const run = vi.fn<AiDesignJobRunner>().mockResolvedValue(errorResult);
+		const { result } = renderHook(() =>
+			useAiDesign({ run, getLayerContext: ARTBOARD }),
+		);
+
+		await act(async () => {
+			result.current.run({ kind: "rewrite-copy", nodeId: "headline" });
+		});
+		await waitFor(() =>
+			expect(result.current.error).toBe("provider timed out"),
+		);
+	});
+
+	it("cancelling an in-flight run resolves to idle with no result/error", async () => {
+		let captured: { signal?: AbortSignal } | undefined;
+		const run: AiDesignJobRunner = (_req, _ctx, options) => {
+			captured = options;
+			return new Promise((_resolve, reject) => {
+				options?.signal?.addEventListener("abort", () => {
+					reject(new DOMException("Aborted", "AbortError"));
+				});
+			});
+		};
+		const { result } = renderHook(() =>
+			useAiDesign({ run, getLayerContext: ARTBOARD }),
+		);
+
+		act(() => result.current.run({ kind: "rewrite-copy", nodeId: "headline" }));
+		expect(result.current.status).toBe("pending");
+
+		await act(async () => {
+			result.current.onCancel();
+		});
+		await waitFor(() => expect(result.current.status).toBe("idle"));
+		expect(captured?.signal?.aborted).toBe(true);
+		expect(result.current.error).toBeNull();
+		expect(result.current.result).toBeNull();
+	});
+
+	it("does not call run without a layer context", () => {
+		const run = vi.fn<AiDesignJobRunner>();
+		const { result } = renderHook(() =>
+			useAiDesign({ run, getLayerContext: NO_CONTEXT }),
+		);
+		expect(result.current.hasLayerContext).toBe(false);
+		act(() => result.current.run({ kind: "rewrite-copy", nodeId: "headline" }));
+		expect(run).not.toHaveBeenCalled();
+		expect(result.current.error).not.toBeNull();
 	});
 });
 
@@ -378,6 +572,319 @@ describe("AiImagePanel", () => {
 		expect(screen.getByTestId("ai-image-source")).toBeInTheDocument();
 		expect(screen.queryByTestId("ai-image-prompt")).toBeNull();
 	});
+
+	it("shows every built-in op — including the FR-050 image-editing ops (UX-006) — when capabilities is omitted", () => {
+		render(
+			<AiImagePanel jobClient={fakeJobClient()} getLayerContext={ARTBOARD} />,
+		);
+		for (const kind of [
+			"text-to-image",
+			"variation",
+			"inpaint",
+			"bg-remove",
+			"upscale",
+			"generative-fill",
+			"generative-expand",
+			"object-erase",
+			"background-replace",
+		]) {
+			expect(screen.getByTestId(`ai-image-op-${kind}`)).toBeInTheDocument();
+		}
+	});
+
+	it("only shows ops in capabilities.imageOps when set (FR-051)", () => {
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD}
+				capabilities={{ imageOps: ["text-to-image", "bg-remove"] }}
+			/>,
+		);
+		expect(screen.getByTestId("ai-image-op-text-to-image")).toBeInTheDocument();
+		expect(screen.getByTestId("ai-image-op-bg-remove")).toBeInTheDocument();
+		expect(screen.queryByTestId("ai-image-op-variation")).toBeNull();
+		expect(screen.queryByTestId("ai-image-op-inpaint")).toBeNull();
+		expect(screen.queryByTestId("ai-image-op-upscale")).toBeNull();
+		expect(screen.queryByTestId("ai-image-op-generative-fill")).toBeNull();
+		expect(screen.queryByTestId("ai-image-op-generative-expand")).toBeNull();
+		expect(screen.queryByTestId("ai-image-op-object-erase")).toBeNull();
+		expect(screen.queryByTestId("ai-image-op-background-replace")).toBeNull();
+	});
+
+	it("dispatches a background-replace request (UX-006 'replace background')", () => {
+		render(
+			<AiImagePanel jobClient={fakeJobClient()} getLayerContext={ARTBOARD} />,
+		);
+		fireEvent.click(screen.getByTestId("ai-image-op-background-replace"));
+		fireEvent.change(screen.getByTestId("ai-image-source"), {
+			target: { value: "src-1" },
+		});
+		fireEvent.change(screen.getByTestId("ai-image-prompt"), {
+			target: { value: "a studio backdrop" },
+		});
+		expect(screen.getByTestId("ai-image-run")).toBeEnabled();
+		expect(screen.queryByTestId("ai-image-mask")).toBeNull();
+	});
+
+	it("dispatches a generative-expand request with target dimensions (UX-006 'expand background')", () => {
+		render(
+			<AiImagePanel jobClient={fakeJobClient()} getLayerContext={ARTBOARD} />,
+		);
+		fireEvent.click(screen.getByTestId("ai-image-op-generative-expand"));
+		expect(screen.getByTestId("ai-image-run")).toBeDisabled();
+		fireEvent.change(screen.getByTestId("ai-image-source"), {
+			target: { value: "src-1" },
+		});
+		fireEvent.change(screen.getByTestId("ai-image-target-width"), {
+			target: { value: "1600" },
+		});
+		fireEvent.change(screen.getByTestId("ai-image-target-height"), {
+			target: { value: "900" },
+		});
+		expect(screen.getByTestId("ai-image-run")).toBeEnabled();
+		expect(screen.queryByTestId("ai-image-seed")).toBeNull();
+	});
+
+	it("shows the mask field for generative-fill and object-erase, mirroring inpaint", () => {
+		render(
+			<AiImagePanel jobClient={fakeJobClient()} getLayerContext={ARTBOARD} />,
+		);
+		fireEvent.click(screen.getByTestId("ai-image-op-generative-fill"));
+		expect(screen.getByTestId("ai-image-mask")).toBeInTheDocument();
+		expect(screen.getByTestId("ai-image-prompt")).toBeInTheDocument();
+
+		fireEvent.click(screen.getByTestId("ai-image-op-object-erase"));
+		expect(screen.getByTestId("ai-image-mask")).toBeInTheDocument();
+		expect(screen.queryByTestId("ai-image-prompt")).toBeNull();
+	});
+
+	it("actually submits the built request for each new op via jobClient.run", async () => {
+		const run = vi.fn<AiImageJobRunner>().mockResolvedValue(completeResult());
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient(run)}
+				getLayerContext={ARTBOARD}
+			/>,
+		);
+
+		fireEvent.click(screen.getByTestId("ai-image-op-generative-expand"));
+		fireEvent.change(screen.getByTestId("ai-image-source"), {
+			target: { value: "src-1" },
+		});
+		fireEvent.change(screen.getByTestId("ai-image-target-width"), {
+			target: { value: "1600" },
+		});
+		fireEvent.change(screen.getByTestId("ai-image-target-height"), {
+			target: { value: "900" },
+		});
+		await act(async () => {
+			fireEvent.click(screen.getByTestId("ai-image-run"));
+		});
+		await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+		expect(run.mock.calls[0]?.[0]).toEqual({
+			kind: "generative-expand",
+			sourceAssetId: "src-1",
+			targetWidth: 1600,
+			targetHeight: 900,
+		});
+	});
+});
+
+describe("AiImagePanel — design actions (FR-053, canvas-m4-004)", () => {
+	const ARTBOARD_WITH_TEXT_NODE = () => ({
+		artboardId: "art-1",
+		selectedNodeId: "headline",
+		selectedNodeKind: "text" as const,
+	});
+
+	function fakeDesignJobClient(
+		run: AiDesignJobRunner = vi.fn(),
+	): AiJobClient<
+		Parameters<AiDesignJobRunner>[0],
+		AiDesignJobResult,
+		Parameters<AiDesignJobRunner>[1]
+	> {
+		return { run } as never;
+	}
+
+	it("hides the whole design-actions section when designJobClient is omitted", () => {
+		render(
+			<AiImagePanel jobClient={fakeJobClient()} getLayerContext={ARTBOARD} />,
+		);
+		expect(screen.queryByTestId("ai-design-actions")).toBeNull();
+	});
+
+	it("shows all three design actions by default (capabilities omitted, brandKit provided)", () => {
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD_WITH_TEXT_NODE}
+				designJobClient={fakeDesignJobClient()}
+				brandKit={{
+					id: "b1",
+					name: "Acme",
+					logos: [],
+					colors: [],
+					fonts: [],
+					typography: [],
+					rules: [],
+				}}
+			/>,
+		);
+		expect(screen.getByTestId("ai-design-actions")).toBeInTheDocument();
+		expect(screen.getByTestId("ai-design-rewrite-run")).toBeInTheDocument();
+		expect(screen.getByTestId("ai-design-layout-run")).toBeInTheDocument();
+		expect(screen.getByTestId("ai-design-brand-run")).toBeInTheDocument();
+	});
+
+	it("hides apply-brand when no brandKit is supplied", () => {
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD_WITH_TEXT_NODE}
+				designJobClient={fakeDesignJobClient()}
+			/>,
+		);
+		expect(screen.queryByTestId("ai-design-brand-run")).toBeNull();
+	});
+
+	it("hides rewrite-copy when the selection is a non-text node kind", () => {
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={() => ({
+					artboardId: "art-1",
+					selectedNodeId: "img-1",
+					selectedNodeKind: "image",
+				})}
+				designJobClient={fakeDesignJobClient()}
+			/>,
+		);
+		expect(screen.queryByTestId("ai-design-rewrite-run")).toBeNull();
+		// generate-layout-variants doesn't depend on selection kind.
+		expect(screen.getByTestId("ai-design-layout-run")).toBeInTheDocument();
+	});
+
+	it("only shows design ops in capabilities.designOps when set (FR-051)", () => {
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD_WITH_TEXT_NODE}
+				designJobClient={fakeDesignJobClient()}
+				capabilities={{ designOps: ["rewrite-copy"] }}
+			/>,
+		);
+		expect(screen.getByTestId("ai-design-rewrite-run")).toBeInTheDocument();
+		expect(screen.queryByTestId("ai-design-layout-run")).toBeNull();
+	});
+
+	it("dispatches a rewrite-copy request with the selected node id and instruction", async () => {
+		const run = vi
+			.fn<AiDesignJobRunner>()
+			.mockResolvedValue(completeDesignResult());
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD_WITH_TEXT_NODE}
+				designJobClient={fakeDesignJobClient(run)}
+			/>,
+		);
+		fireEvent.change(screen.getByTestId("ai-design-rewrite-instruction"), {
+			target: { value: "punchier" },
+		});
+		await act(async () => {
+			fireEvent.click(screen.getByTestId("ai-design-rewrite-run"));
+		});
+		await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+		expect(run.mock.calls[0]?.[0]).toEqual({
+			kind: "rewrite-copy",
+			nodeId: "headline",
+			instruction: "punchier",
+		});
+	});
+
+	it("dispatches a generate-layout-variants request with the current artboard as sourcePageId", async () => {
+		const run = vi
+			.fn<AiDesignJobRunner>()
+			.mockResolvedValue(completeDesignResult());
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD}
+				designJobClient={fakeDesignJobClient(run)}
+			/>,
+		);
+		fireEvent.change(screen.getByTestId("ai-design-layout-count"), {
+			target: { value: "3" },
+		});
+		await act(async () => {
+			fireEvent.click(screen.getByTestId("ai-design-layout-run"));
+		});
+		await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+		expect(run.mock.calls[0]?.[0]).toEqual({
+			kind: "generate-layout-variants",
+			sourcePageId: "art-1",
+			count: 3,
+		});
+	});
+
+	it("dispatches an apply-brand request with the supplied brand kit", async () => {
+		const run = vi
+			.fn<AiDesignJobRunner>()
+			.mockResolvedValue(completeDesignResult());
+		const brandKit = {
+			id: "b1",
+			name: "Acme",
+			logos: [],
+			colors: [],
+			fonts: [],
+			typography: [],
+			rules: [],
+		};
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD}
+				designJobClient={fakeDesignJobClient(run)}
+				brandKit={brandKit}
+			/>,
+		);
+		await act(async () => {
+			fireEvent.click(screen.getByTestId("ai-design-brand-run"));
+		});
+		await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+		expect(run.mock.calls[0]?.[0]).toEqual({
+			kind: "apply-brand",
+			brandKit,
+			targetPageId: "art-1",
+		});
+	});
+
+	it("shows pending status and a working cancel button for a design job", async () => {
+		let capturedSignal: AbortSignal | undefined;
+		const run: AiDesignJobRunner = (_req, _ctx, options) => {
+			capturedSignal = options?.signal;
+			return new Promise((_resolve, reject) => {
+				options?.signal?.addEventListener("abort", () => {
+					reject(new DOMException("Aborted", "AbortError"));
+				});
+			});
+		};
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD}
+				designJobClient={fakeDesignJobClient(run)}
+			/>,
+		);
+		fireEvent.click(screen.getByTestId("ai-design-layout-run"));
+		expect(screen.getByTestId("ai-design-status")).toBeInTheDocument();
+
+		await act(async () => {
+			fireEvent.click(screen.getByTestId("ai-design-cancel"));
+		});
+		await waitFor(() => expect(capturedSignal?.aborted).toBe(true));
+	});
 });
 
 describe("createAiImageSidebarPlugin", () => {
@@ -424,5 +931,30 @@ describe("createAiImageSidebarPlugin", () => {
 		// cleanly when the optional `registerCopilotPanel` is absent.
 		expect(() => registration.hooks?.onInit?.(emptyCtx)).not.toThrow();
 		expect(() => registration.hooks?.onDestroy?.(emptyCtx)).not.toThrow();
+	});
+
+	it("forwards designJobClient/brandKit to the rendered AiImagePanel (FR-053, canvas-m4-004)", async () => {
+		const { ctx, registerCopilotPanel } = makeCtx();
+		const plugin = createAiImageSidebarPlugin({
+			jobClient: fakeJobClient(),
+			getLayerContext: () => ({ artboardId: "art-1" }),
+			designJobClient: { run: vi.fn() } as never,
+			brandKit: {
+				id: "b1",
+				name: "Acme",
+				logos: [],
+				colors: [],
+				fonts: [],
+				typography: [],
+				rules: [],
+			},
+		});
+		const registration = await plugin.register(ctx);
+		await registration.hooks?.onInit?.(ctx);
+
+		const panel = registerCopilotPanel.mock.calls[0]?.[0] as StudioCopilotPanel;
+		render(panel.render());
+		expect(screen.getByTestId("ai-design-actions")).toBeInTheDocument();
+		expect(screen.getByTestId("ai-design-brand-run")).toBeInTheDocument();
 	});
 });
