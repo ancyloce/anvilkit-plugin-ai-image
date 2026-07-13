@@ -3,6 +3,9 @@ import { createAiJobClient } from "../job/ai-job-client.js";
 import { RetryableError } from "../job/retry.js";
 import { createMockAiImageProvider } from "../mock/mock-ai-image-provider.js";
 import type {
+	AiDesignJobRequest,
+	AiDesignJobResult,
+	AiDesignProvider,
 	AiImageJobRequest,
 	AiImageJobResult,
 	AiImageProvider,
@@ -244,5 +247,116 @@ describe("createAiJobClient", () => {
 		}).run(request, context, { signal: controller.signal });
 		controller.abort();
 		expect((await pending).status).toBe("cancelled");
+	});
+});
+
+describe("createAiJobClient — design-job parity (FR-051, canvas-m4-002)", () => {
+	const designRequest: AiDesignJobRequest = {
+		kind: "rewrite-copy",
+		nodeId: "headline",
+	};
+
+	function completeDesignResult(jobId = "design-job-1"): AiDesignJobResult {
+		return {
+			jobId,
+			status: "complete",
+			payload: {
+				kind: "command",
+				command: { type: "batch", commands: [] },
+			},
+			startedAt: 0,
+			finishedAt: 1,
+		};
+	}
+
+	it("resolves to the design provider's terminal result — same client, different types", async () => {
+		const provider = vi.fn<AiDesignProvider>(async () =>
+			completeDesignResult(),
+		);
+		const client = createAiJobClient<
+			AiDesignJobRequest,
+			AiDesignJobResult,
+			AiLayerContext
+		>({ provider, ...deterministic });
+
+		const result = await client.run(designRequest, context);
+
+		expect(result).toEqual(completeDesignResult());
+		expect(provider).toHaveBeenCalledWith(designRequest, context, {
+			signal: undefined,
+		});
+	});
+
+	it("retries a design job on RetryableError, then succeeds", async () => {
+		let attempts = 0;
+		const provider: AiDesignProvider = async () => {
+			attempts += 1;
+			if (attempts < 3) throw new RetryableError("transient");
+			return completeDesignResult();
+		};
+		const client = createAiJobClient<
+			AiDesignJobRequest,
+			AiDesignJobResult,
+			AiLayerContext
+		>({ provider, maxRetries: 3, ...deterministic });
+
+		const result = await client.run(designRequest, context);
+
+		expect(result.status).toBe("complete");
+		expect(attempts).toBe(3);
+	});
+
+	it("cancels an in-flight design job identically to an image job", async () => {
+		const provider = vi.fn<AiDesignProvider>(async () =>
+			completeDesignResult(),
+		);
+		const client = createAiJobClient<
+			AiDesignJobRequest,
+			AiDesignJobResult,
+			AiLayerContext
+		>({ provider, ...deterministic });
+		const controller = new AbortController();
+		controller.abort();
+
+		const result = await client.run(designRequest, context, {
+			signal: controller.signal,
+		});
+
+		expect(result.status).toBe("cancelled");
+		expect(provider).not.toHaveBeenCalled();
+	});
+
+	it("polls a pending design job until terminal, same as the image-job path", async () => {
+		const provider: AiDesignProvider = async () => ({
+			jobId: "design-job-async",
+			status: "pending",
+			startedAt: 0,
+		});
+		let polls = 0;
+		const poll: AiJobPollFn<AiDesignJobResult> = vi.fn(async (jobId) => {
+			polls += 1;
+			return polls < 2
+				? { jobId, status: "pending", startedAt: 0 }
+				: {
+						jobId,
+						status: "complete",
+						payload: {
+							kind: "command",
+							command: { type: "batch", commands: [] },
+						},
+						startedAt: 0,
+						finishedAt: 2,
+					};
+		});
+		const client = createAiJobClient<
+			AiDesignJobRequest,
+			AiDesignJobResult,
+			AiLayerContext
+		>({ provider, poll, pollIntervalMs: 1, ...deterministic });
+
+		const result = await client.run(designRequest, context);
+
+		expect(result.status).toBe("complete");
+		expect(poll).toHaveBeenCalledTimes(2);
 	});
 });

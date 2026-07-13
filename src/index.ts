@@ -1,12 +1,17 @@
 export type {
+	CommitAiDesignCommandFn,
+	CommitAiDesignResultOptions,
+	CommitAiDesignResultOutcome,
 	CommitCanvasCommandFn,
 	CommitImageReplaceOptions,
 } from "./commit/index.js";
-export { commitImageReplace } from "./commit/index.js";
+export { commitAiDesignResult, commitImageReplace } from "./commit/index.js";
 export type {
 	AiJobClient,
 	AiJobClientOptions,
 	AiJobPollFn,
+	AiJobProviderFn,
+	AiJobResultLike,
 	AiJobRunOptions,
 	RetryOptions,
 } from "./job/index.js";
@@ -46,13 +51,26 @@ export type {
 	PostProcessUploadResult,
 } from "./post-process/index.js";
 export type {
+	AiDesignJobError,
+	AiDesignJobKind,
+	AiDesignJobPayload,
+	AiDesignJobRequest,
+	AiDesignJobResult,
+	AiDesignJobStatus,
+	AiDesignProvider,
+	AiDesignProviderOptions,
+	AiDesignQuarantineError,
+	AiImageBackgroundReplaceRequest,
 	AiImageBgRemoveRequest,
+	AiImageGenerativeExpandRequest,
+	AiImageGenerativeFillRequest,
 	AiImageInpaintRequest,
 	AiImageJobError,
 	AiImageJobKind,
 	AiImageJobRequest,
 	AiImageJobResult,
 	AiImageJobStatus,
+	AiImageObjectEraseRequest,
 	AiImagePluginInstance,
 	AiImagePluginOptions,
 	AiImageProvider,
@@ -62,4 +80,6 @@ export type {
 	AiImageVariationRequest,
 	AiLayerBounds,
 	AiLayerContext,
+	AiProviderCapabilities,
+	BrandKitDefinition,
 } from "./types/index.js";

@@ -6,13 +6,26 @@ import type {
 } from "@anvilkit/canvas-core";
 
 export type {
+	AiDesignJobError,
+	AiDesignJobKind,
+	AiDesignJobPayload,
+	AiDesignJobRequest,
+	AiDesignJobResult,
+	AiDesignJobStatus,
+	AiDesignProvider,
+	AiDesignProviderOptions,
+	AiDesignQuarantineError,
+	AiImageBackgroundReplaceRequest,
 	AiImageBgRemoveRequest,
+	AiImageGenerativeExpandRequest,
+	AiImageGenerativeFillRequest,
 	AiImageInpaintRequest,
 	AiImageJobError,
 	AiImageJobKind,
 	AiImageJobRequest,
 	AiImageJobResult,
 	AiImageJobStatus,
+	AiImageObjectEraseRequest,
 	AiImageProvider,
 	AiImageProviderOptions,
 	AiImageTextToImageRequest,
@@ -20,11 +33,15 @@ export type {
 	AiImageVariationRequest,
 	AiLayerBounds,
 	AiLayerContext,
+	AiProviderCapabilities,
+	BrandKitDefinition,
 } from "@anvilkit/canvas-core";
 export type {
 	AiJobClient,
 	AiJobClientOptions,
 	AiJobPollFn,
+	AiJobProviderFn,
+	AiJobResultLike,
 	AiJobRunOptions,
 } from "../job/ai-job-client.js";
 export type { RetryOptions } from "../job/retry.js";
