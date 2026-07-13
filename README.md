@@ -21,6 +21,30 @@ optional React sidebar panel) as separate subpath exports.
 > contribute lifecycle hooks or UI on its own. Mount the panel via
 > `@anvilkit/plugin-ai-image/react` (or wire your own UI on top of `useAiImage`).
 
+## Scope decision: this package fulfills the PRD's `@anvilkit/canvas-ai` role
+
+**Decision (canvas-m4-002, FR-051): no new `@anvilkit/canvas-ai` package.**
+`@anvilkit/plugin-ai-image` is the AI provider adapter package the PRD's
+architecture diagram describes as a future `@anvilkit/canvas-ai`. It already
+had the mock provider, the abort/retry/poll job client, a real non-mock
+provider wired in `apps/studio` (Replicate), a mask editor, a post-process
+pipeline, and a canvas-commit path before this decision was made — splitting
+that into a second package would be pure churn for no capability gained
+(reuse-first: extend what exists rather than duplicate it under a new name).
+
+This decision also covers design-level jobs (canvas-m4-001's
+`AiDesignJobRequest`/`AiDesignJobResult`): `createAiJobClient` is generic over
+the request/result/context types (defaulting to the original image-job types,
+so no existing call site changes), so the same abort/retry/poll guarantees
+drive an `AiDesignProvider` exactly like an `AiImageProvider`. `AiDesignProvider`
+stays a bare function type, sibling to `AiImageProvider`, rather than
+generalizing to an `AssetSourceProvider`-style object interface — restructuring
+the already-widely-consumed `AiImageProvider` now would be a breaking change
+for no behavioral gain. Capability discovery (`AiProviderCapabilities`,
+`@anvilkit/canvas-core`) is separate, additive metadata a host supplies
+alongside its provider(s) — `AiImagePanel`'s `capabilities` prop uses it to
+show only the ops a given provider actually supports.
+
 ## Installation
 
 ```sh
@@ -73,9 +97,14 @@ const result = await aiImage.submit(
 
 ## Core features
 
-- **One typed provider contract** — five job kinds (`text-to-image`, `variation`,
-  `inpaint`, `bg-remove`, `upscale`) flow through a single `AiImageProvider`
-  callback. No credentials or model identifiers cross the plugin boundary.
+- **One typed provider contract** — nine job kinds (`text-to-image`,
+  `variation`, `inpaint`, `bg-remove`, `upscale`, and canvas-m4-001's
+  `generative-fill`, `generative-expand`, `object-erase`, `background-replace`)
+  flow through a single `AiImageProvider` callback, all shown in `AiImagePanel`'s
+  op selector by default (UX-006: generate / remove / replace / expand
+  background). `capabilities.imageOps` (FR-051) narrows the selector to what a
+  given provider actually implements. No credentials or model identifiers
+  cross the plugin boundary.
 - **Abort / retry / poll job client** — `createAiJobClient` wraps a provider with
   transient-failure retry (exponential backoff + jitter) and optional polling for
   async jobs that return `status: "pending"`.
@@ -88,6 +117,17 @@ const result = await aiImage.submit(
 - **React sidebar panel** — `AiImagePanel` + the self-registering
   `createAiImageSidebarPlugin` drop the generation UI into the Studio sidebar's
   `copilot` module.
+- **Design actions (FR-053, canvas-m4-004)** — `AiImagePanel` also surfaces
+  rewrite-selected-text, generate-layout-variants, and apply-brand-kit-via-AI
+  when the host supplies `designJobClient` (an `AiJobClient` typed for
+  `AiDesignJobRequest`/`AiDesignJobResult`, canvas-m4-001) and, for the brand
+  action, `brandKit`. Each action builds its request, runs it through the same
+  abort/retry/poll `AiJobClient` as image ops (`useAiDesign` mirrors
+  `useAiImage`'s status/result/error/cancel shape), and — on completion —
+  validates the result (canvas-m4-003's quarantine layer) before committing it
+  via `designCommit`. `capabilities.designOps` (FR-051) conditionally hides
+  actions the host's provider doesn't support; rewrite-copy additionally hides
+  itself when `AiLayerContext.selectedNodeKind` names a non-text node.
 - **Deterministic mock** — `createMockAiImageProvider` simulates latency and
   per-kind results (and forced failures) for tests and demos.
 
