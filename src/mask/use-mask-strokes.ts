@@ -45,8 +45,6 @@ export function useMaskStrokes(
 	const [strokes, setStrokes] = useState<MaskStroke[]>([]);
 	const [brushSize, setBrushSize] = useState(options.brushSize ?? 24);
 	const activeIdRef = useRef<string | null>(null);
-	const brushRef = useRef(brushSize);
-	brushRef.current = brushSize;
 
 	const onStrokeStart = useCallback(
 		(point: MaskPoint) => {
@@ -54,10 +52,10 @@ export function useMaskStrokes(
 			activeIdRef.current = id;
 			setStrokes((prev) => [
 				...prev,
-				{ id, points: [point.x, point.y], width: brushRef.current },
+				{ id, points: [point.x, point.y], width: brushSize },
 			]);
 		},
-		[generateId],
+		[brushSize, generateId],
 	);
 
 	const onStrokeExtend = useCallback((point: MaskPoint) => {

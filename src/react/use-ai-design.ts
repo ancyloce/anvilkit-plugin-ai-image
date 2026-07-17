@@ -1,9 +1,11 @@
 "use client";
 
 import { useMsg } from "@anvilkit/core/i18n";
-import { useCallback, useRef, useState } from "react";
-import type { CommitAiDesignCommandFn } from "../commit/index.js";
-import { commitAiDesignResult } from "../commit/index.js";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	commitAiDesignResult,
+	type CommitAiDesignCommandFn,
+} from "../commit/commit-ai-design-result.js";
 import type {
 	AiDesignJobRequest,
 	AiDesignJobResult,
@@ -68,7 +70,9 @@ export function useAiDesign(options: UseAiDesignOptions): UseAiDesignResult {
 	const abortRef = useRef<AbortController | null>(null);
 
 	const latest = useRef({ run, getLayerContext, commit });
-	latest.current = { run, getLayerContext, commit };
+	useEffect(() => {
+		latest.current = { run, getLayerContext, commit };
+	}, [commit, getLayerContext, run]);
 
 	const safeLayerContext = (): AiLayerContext | null => {
 		try {
@@ -78,11 +82,18 @@ export function useAiDesign(options: UseAiDesignOptions): UseAiDesignResult {
 		}
 	};
 
-	const hasLayerContext = safeLayerContext() !== null;
+	let hasLayerContext = false;
+	try {
+		hasLayerContext = getLayerContext() !== null;
+	} catch {
+		hasLayerContext = false;
+	}
 
 	const msg = useMsg();
 	const msgRef = useRef(msg);
-	msgRef.current = msg;
+	useEffect(() => {
+		msgRef.current = msg;
+	}, [msg]);
 
 	const onCancel = useCallback((): void => {
 		abortRef.current?.abort();

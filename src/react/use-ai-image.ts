@@ -1,9 +1,11 @@
 "use client";
 
 import { useMsg } from "@anvilkit/core/i18n";
-import { useCallback, useRef, useState } from "react";
-import type { CommitCanvasCommandFn } from "../commit/index.js";
-import { commitImageReplace } from "../commit/index.js";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+	commitImageReplace,
+	type CommitCanvasCommandFn,
+} from "../commit/commit-image-replace.js";
 import type {
 	AiImageJobKind,
 	AiImageJobRequest,
@@ -304,20 +306,35 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		commit,
 		postProcess,
 	});
-	latest.current = {
-		op,
-		prompt,
-		negativePrompt,
-		sourceAssetId,
-		maskAssetId,
-		targetWidth,
-		targetHeight,
-		seed,
-		run,
-		getLayerContext,
+	useEffect(() => {
+		latest.current = {
+			op,
+			prompt,
+			negativePrompt,
+			sourceAssetId,
+			maskAssetId,
+			targetWidth,
+			targetHeight,
+			seed,
+			run,
+			getLayerContext,
+			commit,
+			postProcess,
+		};
+	}, [
 		commit,
+		getLayerContext,
+		maskAssetId,
+		negativePrompt,
+		op,
 		postProcess,
-	};
+		prompt,
+		run,
+		seed,
+		sourceAssetId,
+		targetHeight,
+		targetWidth,
+	]);
 
 	// Resolve the layer context defensively: a host may inject a getter
 	// that throws before it is wired (the default factory does). A throw
@@ -330,7 +347,12 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		}
 	};
 
-	const hasLayerContext = safeLayerContext() !== null;
+	let hasLayerContext = false;
+	try {
+		hasLayerContext = getLayerContext() !== null;
+	} catch {
+		hasLayerContext = false;
+	}
 	const canRun =
 		status === "idle" &&
 		hasLayerContext &&
@@ -348,7 +370,9 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 	// rides along in a ref so error fallbacks localize without re-creating it.
 	const msg = useMsg();
 	const msgRef = useRef(msg);
-	msgRef.current = msg;
+	useEffect(() => {
+		msgRef.current = msg;
+	}, [msg]);
 
 	const onCancel = useCallback((): void => {
 		abortRef.current?.abort();
