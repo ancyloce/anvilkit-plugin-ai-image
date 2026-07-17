@@ -13,7 +13,7 @@
 				"default": "./dist/index.js"
 			},
 			"require": {
-				"types": "./dist/index.d.cts",
+				"types": "./dist/cjs/index.d.cts",
 				"default": "./dist/index.cjs"
 			}
 		},
@@ -23,7 +23,7 @@
 				"default": "./dist/mock/index.js"
 			},
 			"require": {
-				"types": "./dist/mock/index.d.cts",
+				"types": "./dist/cjs/mock/index.d.cts",
 				"default": "./dist/mock/index.cjs"
 			}
 		},
@@ -33,7 +33,7 @@
 				"default": "./dist/react/index.js"
 			},
 			"require": {
-				"types": "./dist/react/index.d.cts",
+				"types": "./dist/cjs/react/index.d.cts",
 				"default": "./dist/react/index.cjs"
 			}
 		},
@@ -43,7 +43,7 @@
 				"default": "./dist/mask/index.js"
 			},
 			"require": {
-				"types": "./dist/mask/index.d.cts",
+				"types": "./dist/cjs/mask/index.d.cts",
 				"default": "./dist/mask/index.cjs"
 			}
 		},
@@ -53,7 +53,7 @@
 				"default": "./dist/post-process/index.js"
 			},
 			"require": {
-				"types": "./dist/post-process/index.d.cts",
+				"types": "./dist/cjs/post-process/index.d.cts",
 				"default": "./dist/post-process/index.cjs"
 			}
 		},
@@ -63,7 +63,7 @@
 				"default": "./dist/commit/index.js"
 			},
 			"require": {
-				"types": "./dist/commit/index.d.cts",
+				"types": "./dist/cjs/commit/index.d.cts",
 				"default": "./dist/commit/index.cjs"
 			}
 		}
@@ -113,7 +113,7 @@
 		"lucide-react": "^1.21.0"
 	},
 	"scripts": {
-		"build": "rslib build",
+		"build": "rslib build --lib esm && rslib build --lib cjs --no-clean",
 		"dev": "rslib build --watch",
 		"lint": "pnpm exec biome lint package.json tsconfig.json rslib.config.ts vitest.config.ts src meta",
 		"format": "pnpm exec biome check --write package.json tsconfig.json rslib.config.ts vitest.config.ts src meta",

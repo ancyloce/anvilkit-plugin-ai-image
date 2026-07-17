@@ -31,6 +31,10 @@ export interface UseMaskStrokesResult {
 
 let autoSeq = 0;
 
+function createMaskStrokeId(): string {
+	return `mask-stroke-${(autoSeq += 1)}`;
+}
+
 /**
  * Local-state controller for {@link MaskEditorLayer} (PRD FR-022: "captures
  * strokes (local state, no global writes)"). Owns the stroke list + brush size;
@@ -40,8 +44,7 @@ let autoSeq = 0;
 export function useMaskStrokes(
 	options: UseMaskStrokesOptions = {},
 ): UseMaskStrokesResult {
-	const generateId =
-		options.generateId ?? (() => `mask-stroke-${(autoSeq += 1)}`);
+	const generateId = options.generateId ?? createMaskStrokeId;
 	const [strokes, setStrokes] = useState<MaskStroke[]>([]);
 	const [brushSize, setBrushSize] = useState(options.brushSize ?? 24);
 	const activeIdRef = useRef<string | null>(null);
