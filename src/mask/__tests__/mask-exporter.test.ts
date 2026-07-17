@@ -228,7 +228,9 @@ describe("createMaskToAssetExporter", () => {
 		});
 		const id = await exporter.exportMask([], { width: 8, height: 8 });
 		expect(id).toBe("empty-mask");
-		expect((upload.mock.calls[0]?.[0] as File).name).toBe("m.png");
+		const uploadedFile = upload.mock.calls[0]?.[0] as File | undefined;
+		if (!uploadedFile) throw new Error("Expected mask upload");
+		expect(uploadedFile.name).toBe("m.png");
 	});
 
 	it("throws when `upload` is not a function", () => {

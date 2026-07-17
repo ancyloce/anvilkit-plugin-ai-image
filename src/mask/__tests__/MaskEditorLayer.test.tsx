@@ -101,13 +101,13 @@ describe("MaskEditorLayer", () => {
 			/>,
 		);
 		const rect = first("Rect");
-		expect(rect).toBeDefined();
-		(rect?.props.onMouseDown as (e: unknown) => void)(stageEvent(30, 50));
+		if (!rect) throw new Error("Expected mask interaction rectangle");
+		(rect.props.onMouseDown as (e: unknown) => void)(stageEvent(30, 50));
 		// Stage point (30,50) minus bounds origin (10,20) → local (20,30).
 		expect(onStrokeStart).toHaveBeenCalledWith({ x: 20, y: 30 });
-		(rect?.props.onMouseMove as (e: unknown) => void)(stageEvent(40, 60));
+		(rect.props.onMouseMove as (e: unknown) => void)(stageEvent(40, 60));
 		expect(onStrokeExtend).toHaveBeenCalledWith({ x: 30, y: 40 });
-		(rect?.props.onMouseUp as () => void)();
+		(rect.props.onMouseUp as () => void)();
 		expect(onStrokeEnd).toHaveBeenCalledTimes(1);
 	});
 
@@ -123,7 +123,8 @@ describe("MaskEditorLayer", () => {
 			/>,
 		);
 		const rect = first("Rect");
-		(rect?.props.onMouseDown as (e: unknown) => void)(stageEvent(null));
+		if (!rect) throw new Error("Expected mask interaction rectangle");
+		(rect.props.onMouseDown as (e: unknown) => void)(stageEvent(null));
 		expect(onStrokeStart).not.toHaveBeenCalled();
 	});
 });
