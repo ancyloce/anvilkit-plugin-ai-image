@@ -110,7 +110,7 @@
 		"@anvilkit/canvas-core": "workspace:*",
 		"@anvilkit/core": "workspace:*",
 		"@anvilkit/utils": "workspace:*",
-		"lucide-react": "^1.21.0"
+		"lucide-react": "^1.28.0"
 	},
 	"scripts": {
 		"build": "rslib build --lib esm && rslib build --lib cjs --no-clean",
