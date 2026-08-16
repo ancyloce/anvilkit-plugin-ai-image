@@ -110,7 +110,7 @@
 		"@anvilkit/canvas-core": "workspace:*",
 		"@anvilkit/core": "workspace:*",
 		"@anvilkit/utils": "workspace:*",
-		"lucide-react": "^1.30.0"
+		"lucide-react": "^1.31.0"
 	},
 	"scripts": {
 		"build": "rslib build --lib esm && rslib build --lib cjs --no-clean",
@@ -131,13 +131,13 @@
 		"@puckeditor/core": "^0.23.0",
 		"@rsbuild/plugin-react": "^2.1.0",
 		"@rslib/core": "^0.23.2",
-		"@testing-library/jest-dom": "^6.9.1",
+		"@testing-library/jest-dom": "^7.0.1",
 		"@testing-library/react": "^16.3.2",
 		"@types/node": "^26.2.0",
 		"@types/react": "^19.2.18",
 		"@types/react-dom": "19.2.4",
 		"jsdom": "^30.0.1",
-		"konva": "^10.3.0",
+		"konva": "^10.3.1",
 		"publint": "^0.3.23",
 		"react": "^19.2.8",
 		"react-dom": "^19.2.8",
