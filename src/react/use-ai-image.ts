@@ -3,11 +3,14 @@
 import { useMsg } from "@anvilkit/core/i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-	commitImageReplace,
 	type CommitCanvasCommandFn,
+	commitImageReplace,
 } from "../commit/commit-image-replace.js";
 import type {
+	AiImageCapability,
+	AiImageJobError,
 	AiImageJobKind,
+	AiImageJobProgress,
 	AiImageJobRequest,
 	AiImageJobResult,
 	AiLayerContext,
@@ -24,8 +27,20 @@ import type {
 export type AiImageJobRunner = (
 	request: AiImageJobRequest,
 	context: AiLayerContext,
-	options?: { signal?: AbortSignal },
+	options?: {
+		signal?: AbortSignal;
+		onProgress?: (progress: AiImageJobProgress) => void;
+	},
 ) => Promise<AiImageJobResult>;
+
+export type AiImageApplyMode = "replace" | "insert-copy";
+
+export interface AiImageResultPreview {
+	readonly request: AiImageJobRequest;
+	readonly context: AiLayerContext;
+	readonly originalAssetId: string | null;
+	readonly result: Extract<AiImageJobResult, { status: "complete" }>;
+}
 
 export interface UseAiImageOptions {
 	/**
@@ -46,6 +61,13 @@ export interface UseAiImageOptions {
 	readonly getLayerContext: () => AiLayerContext | null;
 	/** Op selected on first render. Defaults to `"text-to-image"`. */
 	readonly defaultOp?: AiImageJobKind;
+	/** Detailed provider availability and input constraints for the visible ops. */
+	readonly capabilities?: readonly AiImageCapability[];
+	/** Host application seam for explicit replace/insert-copy application. */
+	readonly applyResult?: (
+		preview: AiImageResultPreview,
+		mode: AiImageApplyMode,
+	) => Promise<void> | void;
 	/**
 	 * Optional. When a non-`text-to-image` job completes against the selected
 	 * node, commit an `image.replace` through the host's history store. Injected
@@ -87,14 +109,26 @@ export interface UseAiImageResult {
 	readonly seed: string;
 	readonly onSeedChange: (next: string) => void;
 	readonly status: "idle" | "pending";
+	readonly applyStatus: "idle" | "applying";
+	readonly progress: AiImageJobProgress | null;
 	readonly result: AiImageJobResult | null;
+	readonly preview: AiImageResultPreview | null;
 	readonly error: string | null;
+	readonly jobError: AiImageJobError | null;
 	/** True when the active op's required fields are filled and a layer context exists. */
 	readonly canRun: boolean;
+	/** Actionable explanation for a disabled Run control. */
+	readonly runDisabledReason: string | null;
+	readonly canRetry: boolean;
+	readonly canReplace: boolean;
+	readonly canInsertCopy: boolean;
 	/** True when `getLayerContext()` currently yields no context. */
 	readonly hasLayerContext: boolean;
 	readonly onRun: () => void;
+	readonly onRetry: () => void;
 	readonly onCancel: () => void;
+	readonly onApply: (mode: AiImageApplyMode) => void;
+	readonly onDiscard: () => void;
 }
 
 interface AiImageFields {
@@ -271,6 +305,8 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		run,
 		getLayerContext,
 		defaultOp = "text-to-image",
+		capabilities,
+		applyResult,
 		commit,
 		postProcess,
 	} = options;
@@ -284,10 +320,15 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 	const [targetHeight, setTargetHeight] = useState("");
 	const [seed, setSeed] = useState("");
 	const [status, setStatus] = useState<"idle" | "pending">("idle");
+	const [applyStatus, setApplyStatus] = useState<"idle" | "applying">("idle");
+	const [progress, setProgress] = useState<AiImageJobProgress | null>(null);
 	const [result, setResult] = useState<AiImageJobResult | null>(null);
+	const [preview, setPreview] = useState<AiImageResultPreview | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [jobError, setJobError] = useState<AiImageJobError | null>(null);
 
 	const abortRef = useRef<AbortController | null>(null);
+	const previewRef = useRef<AiImageResultPreview | null>(null);
 
 	// Keep the latest inputs + injected callbacks in a ref so `onRun` is
 	// referentially stable and never reads a stale closure, regardless of
@@ -301,6 +342,8 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		targetWidth,
 		targetHeight,
 		seed,
+		capabilities,
+		applyResult,
 		run,
 		getLayerContext,
 		commit,
@@ -316,6 +359,8 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 			targetWidth,
 			targetHeight,
 			seed,
+			capabilities,
+			applyResult,
 			run,
 			getLayerContext,
 			commit,
@@ -323,6 +368,8 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		};
 	}, [
 		commit,
+		capabilities,
+		applyResult,
 		getLayerContext,
 		maskAssetId,
 		negativePrompt,
@@ -347,24 +394,22 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		}
 	};
 
-	let hasLayerContext = false;
+	let layerContext: AiLayerContext | null = null;
 	try {
-		hasLayerContext = getLayerContext() !== null;
+		layerContext = getLayerContext();
 	} catch {
-		hasLayerContext = false;
+		layerContext = null;
 	}
-	const canRun =
-		status === "idle" &&
-		hasLayerContext &&
-		buildRequest(op, {
-			prompt,
-			negativePrompt,
-			sourceAssetId,
-			maskAssetId,
-			targetWidth,
-			targetHeight,
-			seed,
-		}) !== null;
+	const hasLayerContext = layerContext !== null;
+	const request = buildRequest(op, {
+		prompt,
+		negativePrompt,
+		sourceAssetId: sourceAssetId || layerContext?.selectedAssetId || "",
+		maskAssetId,
+		targetWidth,
+		targetHeight,
+		seed,
+	});
 
 	// `onRun` keeps stable `[]` deps via the `latest` ref; the msg resolver
 	// rides along in a ref so error fallbacks localize without re-creating it.
@@ -374,24 +419,87 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		msgRef.current = msg;
 	}, [msg]);
 
+	const capability = capabilities?.find(({ kind }) => kind === op);
+	const imageSelectionRequired = op !== "text-to-image";
+	const runDisabledReason = (() => {
+		if (status === "pending") {
+			return msg("aiImage.requirement.pending", "Wait for the current job.");
+		}
+		if (!layerContext) {
+			return msg("aiImage.panel.noContext", "Open a canvas page to continue.");
+		}
+		if (capability && !capability.available) {
+			return (
+				capability.unavailableReason ??
+				msg(
+					"aiImage.requirement.providerUnavailable",
+					"This provider does not currently support the selected task.",
+				)
+			);
+		}
+		if (
+			imageSelectionRequired &&
+			(!layerContext.selectedNodeId ||
+				(layerContext.selectedNodeKind !== undefined &&
+					layerContext.selectedNodeKind !== "image"))
+		) {
+			return msg(
+				"aiImage.requirement.imageSelection",
+				"Select an image on the active page to use this task.",
+			);
+		}
+		const maxPromptCharacters = capability?.constraints?.maxPromptCharacters;
+		if (
+			maxPromptCharacters !== undefined &&
+			prompt.length > maxPromptCharacters
+		) {
+			return `Prompt must be ${maxPromptCharacters} characters or fewer.`;
+		}
+		if (!request) {
+			return msg(
+				"aiImage.requirement.inputs",
+				"Complete the required inputs for this task.",
+			);
+		}
+		return null;
+	})();
+	const canRun = runDisabledReason === null && applyStatus === "idle";
+	const canRetry = status === "idle" && error !== null;
+	const canReplace =
+		preview !== null &&
+		applyStatus === "idle" &&
+		(Boolean(applyResult) ||
+			(Boolean(commit) &&
+				preview.originalAssetId !== null &&
+				Boolean(preview.context.selectedNodeId)));
+	const canInsertCopy =
+		preview !== null && applyStatus === "idle" && Boolean(applyResult);
+
 	const onCancel = useCallback((): void => {
 		abortRef.current?.abort();
 	}, []);
 
 	const onRun = useCallback((): void => {
 		const snapshot = latest.current;
-		const request = buildRequest(snapshot.op, snapshot);
-		if (request === null) {
-			return;
-		}
 		const context = safeLayerContext();
 		if (context === null) {
 			setError(msgRef.current("aiImage.error.noContext"));
 			return;
 		}
+		const request = buildRequest(snapshot.op, {
+			...snapshot,
+			sourceAssetId: snapshot.sourceAssetId || context.selectedAssetId || "",
+		});
+		if (request === null) {
+			return;
+		}
 
 		setError(null);
+		setJobError(null);
 		setResult(null);
+		setPreview(null);
+		previewRef.current = null;
+		setProgress(null);
 		setStatus("pending");
 
 		// Supersede any in-flight run: abort it, then take ownership of
@@ -404,56 +512,43 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		abortRef.current = controller;
 
 		snapshot
-			.run(request, context, { signal: controller.signal })
+			.run(request, context, {
+				signal: controller.signal,
+				onProgress: (nextProgress) => {
+					if (abortRef.current === controller) {
+						setProgress(nextProgress);
+					}
+				},
+			})
 			.then(async (next) => {
 				if (abortRef.current !== controller) {
 					return;
 				}
 				if (next.status === "cancelled") {
 					// User-cancelled — leave the form intact, surface nothing.
+					setProgress(null);
 					return;
 				}
 				setResult(next);
 				if (next.status === "error") {
+					setJobError(next.error);
 					setError(
 						next.error?.message ?? msgRef.current("aiImage.error.jobFailed"),
 					);
 					return;
 				}
 
-				// Opt-in round-trip: for ops that target an existing node, commit
-				// an `image.replace` swapping its asset for the (optionally
-				// post-processed) result. No-op unless the host injected `commit`
-				// and the layer context names a selected node.
 				if (next.status !== "complete" || !next.resultAssetId) {
 					return;
 				}
-				const commitFn = snapshot.commit;
-				const sourceAssetId = requestSourceAssetId(request);
-				const nodeId = context.selectedNodeId;
-				if (!commitFn || sourceAssetId === null || !nodeId) {
-					return;
-				}
-				try {
-					let toAssetId = next.resultAssetId;
-					if (snapshot.postProcess) {
-						toAssetId = await snapshot.postProcess(next, request, context);
-						if (abortRef.current !== controller) {
-							return;
-						}
-					}
-					await commitImageReplace({
-						commit: commitFn,
-						nodeId,
-						fromAssetId: sourceAssetId,
-						toAssetId,
-					});
-				} catch (err) {
-					if (abortRef.current !== controller) {
-						return;
-					}
-					setError(err instanceof Error ? err.message : String(err));
-				}
+				const nextPreview: AiImageResultPreview = {
+					request,
+					context,
+					originalAssetId: requestSourceAssetId(request),
+					result: next,
+				};
+				previewRef.current = nextPreview;
+				setPreview(nextPreview);
 			})
 			.catch((err: unknown) => {
 				if (abortRef.current !== controller) {
@@ -463,7 +558,14 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 				if (controller.signal.aborted) {
 					return;
 				}
-				setError(err instanceof Error ? err.message : String(err));
+				const message = err instanceof Error ? err.message : String(err);
+				setJobError({
+					code: "UNEXPECTED_PROVIDER_ERROR",
+					message,
+					category: "unknown",
+					retryable: true,
+				});
+				setError(message);
 			})
 			.finally(() => {
 				// Only the still-current run resets the shared status; a
@@ -475,10 +577,73 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 			});
 		// `latest` ref makes every dependency stable; intentionally `[]`.
 	}, []);
+	const onRetry = onRun;
+	const onApply = useCallback((mode: AiImageApplyMode): void => {
+		const currentPreview = previewRef.current;
+		if (!currentPreview) return;
+		const snapshot = latest.current;
+		const apply = async (): Promise<void> => {
+			if (snapshot.applyResult) {
+				await snapshot.applyResult(currentPreview, mode);
+				return;
+			}
+			if (mode !== "replace") {
+				throw new Error("Insert copy requires an applyResult host adapter.");
+			}
+			const nodeId = currentPreview.context.selectedNodeId;
+			const fromAssetId = currentPreview.originalAssetId;
+			if (!snapshot.commit || !nodeId || !fromAssetId) {
+				throw new Error("Replace requires a selected image and commit adapter.");
+			}
+			let toAssetId = currentPreview.result.resultAssetId;
+			if (snapshot.postProcess) {
+				toAssetId = await snapshot.postProcess(
+					currentPreview.result,
+					currentPreview.request,
+					currentPreview.context,
+				);
+			}
+			await commitImageReplace({
+				commit: snapshot.commit,
+				nodeId,
+				fromAssetId,
+				toAssetId,
+			});
+		};
+
+		setApplyStatus("applying");
+		setError(null);
+		void apply()
+			.then(() => {
+				previewRef.current = null;
+				setPreview(null);
+				setResult(null);
+			})
+			.catch((err: unknown) => {
+				setError(err instanceof Error ? err.message : String(err));
+			})
+			.finally(() => setApplyStatus("idle"));
+	}, []);
+	const onDiscard = useCallback((): void => {
+		previewRef.current = null;
+		setPreview(null);
+		setResult(null);
+		setError(null);
+		setJobError(null);
+	}, []);
+	const onOpChange = useCallback((next: AiImageJobKind): void => {
+		setOp(next);
+		setError(null);
+		setJobError(null);
+		setResult(null);
+		setPreview(null);
+		previewRef.current = null;
+		setProgress(null);
+	}, []);
 
 	return {
 		op,
-		onOpChange: setOp,
+		onOpChange,
 		prompt,
 		onPromptChange: setPrompt,
 		negativePrompt,
@@ -494,11 +659,22 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		seed,
 		onSeedChange: setSeed,
 		status,
+		applyStatus,
+		progress,
 		result,
+		preview,
 		error,
+		jobError,
 		canRun,
+		runDisabledReason,
+		canRetry,
+		canReplace,
+		canInsertCopy,
 		hasLayerContext,
 		onRun,
+		onRetry,
 		onCancel,
+		onApply,
+		onDiscard,
 	};
 }

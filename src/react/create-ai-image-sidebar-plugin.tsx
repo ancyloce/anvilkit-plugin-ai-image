@@ -13,6 +13,7 @@ import type {
 	AiDesignJobRequest,
 	AiDesignJobResult,
 	AiImageJobKind,
+	AiImageProviderDescriptor,
 	AiJobClient,
 	AiLayerContext,
 	AiProviderCapabilities,
@@ -37,6 +38,8 @@ export interface CreateAiImageSidebarPluginOptions {
 	readonly getLayerContext?: () => AiLayerContext | null;
 	/** Which ops the host's provider supports (FR-051); forwarded to {@link AiImagePanel}. */
 	readonly capabilities?: AiProviderCapabilities;
+	/** Detailed image capability discovery used for disabled states and limits. */
+	readonly providerDescriptor?: AiImageProviderDescriptor;
 	/** Op selected on first render. Defaults to `"text-to-image"`. */
 	readonly defaultOp?: AiImageJobKind;
 	/** Drives the FR-053 design actions (rewrite text, layout variants, apply brand); omitted hides that section. */
@@ -49,6 +52,8 @@ export interface CreateAiImageSidebarPluginOptions {
 	readonly designCommit?: CommitAiDesignCommandFn;
 	/** Required for the "apply brand kit via AI" action; omitted hides that one action. */
 	readonly brandKit?: BrandKitDefinition;
+	/** Prompt examples forwarded to the image panel. */
+	readonly examples?: AiImagePanelProps["examples"];
 	/** Injected i18n copy forwarded to {@link AiImagePanel}. */
 	readonly labels?: Pick<
 		AiImagePanelProps,
@@ -56,6 +61,7 @@ export interface CreateAiImageSidebarPluginOptions {
 		| "promptPlaceholder"
 		| "runLabel"
 		| "cancelLabel"
+		| "retryLabel"
 		| "opLabels"
 		| "noContextLabel"
 	>;
@@ -94,10 +100,12 @@ export function createAiImageSidebarPlugin(
 				jobClient={options.jobClient}
 				getLayerContext={getLayerContext}
 				capabilities={options.capabilities}
+				providerDescriptor={options.providerDescriptor}
 				defaultOp={options.defaultOp}
 				designJobClient={options.designJobClient}
 				designCommit={options.designCommit}
 				brandKit={options.brandKit}
+				examples={options.examples}
 				{...options.labels}
 			/>
 		),

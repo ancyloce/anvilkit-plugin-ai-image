@@ -1,6 +1,12 @@
 "use client";
 
 import { useMsg } from "@anvilkit/core/i18n";
+import { Alert, AlertDescription, AlertTitle } from "@anvilkit/ui/alert";
+import { Button } from "@anvilkit/ui/button";
+import { Input } from "@anvilkit/ui/input";
+import { Label } from "@anvilkit/ui/label";
+import { Progress } from "@anvilkit/ui/progress";
+import { Textarea } from "@anvilkit/ui/textarea";
 import type { CSSProperties, ReactElement } from "react";
 import { useState } from "react";
 
@@ -12,7 +18,9 @@ import type {
 	AiDesignJobKind,
 	AiDesignJobRequest,
 	AiDesignJobResult,
+	AiImageCapability,
 	AiImageJobKind,
+	AiImageProviderDescriptor,
 	AiJobClient,
 	AiLayerContext,
 	AiProviderCapabilities,
@@ -51,6 +59,16 @@ const DEFAULT_OP_LABELS: Record<AiImageJobKind, string> = {
 	"background-replace": "Replace background",
 };
 
+const DEFAULT_PROMPT_EXAMPLES: Partial<
+	Record<AiImageJobKind, readonly string[]>
+> = {
+	"text-to-image": [
+		"Editorial product photo on a soft neutral background",
+		"Paper-cut landscape with warm sunrise colors",
+	],
+	"generative-expand": ["Continue the scene naturally beyond the edges"],
+};
+
 export interface AiImagePanelProps {
 	/**
 	 * Drives jobs. Recommended: an {@link AiJobClient} (keeps the I1-5
@@ -70,6 +88,8 @@ export interface AiImagePanelProps {
 	 * every built-in op regardless of provider support.
 	 */
 	readonly capabilities?: AiProviderCapabilities;
+	/** Detailed discovery result with availability, constraints, and costs. */
+	readonly providerDescriptor?: AiImageProviderDescriptor;
 	/** Op selected on first render. Defaults to `"text-to-image"`. */
 	readonly defaultOp?: AiImageJobKind;
 	/**
@@ -102,7 +122,9 @@ export interface AiImagePanelProps {
 	readonly promptPlaceholder?: string;
 	readonly runLabel?: string;
 	readonly cancelLabel?: string;
+	readonly retryLabel?: string;
 	readonly opLabels?: Partial<Record<AiImageJobKind, string>>;
+	readonly examples?: Partial<Record<AiImageJobKind, readonly string[]>>;
 	readonly noContextLabel?: string;
 	readonly className?: string;
 }
@@ -232,6 +254,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 		jobClient,
 		getLayerContext,
 		capabilities,
+		providerDescriptor,
 		defaultOp,
 		commit,
 		postProcess,
@@ -242,14 +265,28 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 		promptPlaceholder,
 		runLabel,
 		cancelLabel,
+		retryLabel,
 		opLabels,
+		examples = DEFAULT_PROMPT_EXAMPLES,
 		noContextLabel,
 		className,
 	} = props;
 
-	const visibleOps = capabilities?.imageOps
-		? OP_ORDER.filter((kind) => capabilities.imageOps?.includes(kind))
-		: OP_ORDER;
+	const detailedCapabilities = providerDescriptor?.capabilities;
+	const visibleOps = detailedCapabilities
+		? OP_ORDER.filter((kind) =>
+				detailedCapabilities.some((capability) => capability.kind === kind),
+			)
+		: capabilities?.imageOps
+			? OP_ORDER.filter((kind) => capabilities.imageOps?.includes(kind))
+			: OP_ORDER;
+	const capabilityFor = (kind: AiImageJobKind): AiImageCapability | undefined =>
+		detailedCapabilities?.find((capability) => capability.kind === kind);
+	const resolvedDefaultOp =
+		defaultOp && visibleOps.includes(defaultOp)
+			? defaultOp
+			: (visibleOps.find((kind) => capabilityFor(kind)?.available !== false) ??
+				"text-to-image");
 
 	const supportsDesignOp = (kind: AiDesignJobKind): boolean =>
 		capabilities?.designOps ? capabilities.designOps.includes(kind) : true;
@@ -261,19 +298,62 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 		promptPlaceholder ?? msg("aiImage.panel.promptPlaceholder");
 	const runLabelText = runLabel ?? msg("aiImage.panel.run");
 	const cancelLabelText = cancelLabel ?? msg("aiImage.panel.cancel");
+	const retryLabelText = retryLabel ?? msg("aiImage.panel.retry", "Retry task");
 	const noContextLabelText = noContextLabel ?? msg("aiImage.panel.noContext");
+	let selectedContext: AiLayerContext | null = null;
+	try {
+		selectedContext = getLayerContext();
+	} catch {
+		selectedContext = null;
+	}
 
 	const ai = useAiImage({
 		run: (request, context, options) =>
 			jobClient.run(request, context, options),
 		getLayerContext,
-		defaultOp,
+		defaultOp: resolvedDefaultOp,
+		capabilities: detailedCapabilities,
 		commit,
 		postProcess,
 	});
 
 	const labelFor = (kind: AiImageJobKind): string =>
 		opLabels?.[kind] ?? msg(`aiImage.op.${kind}`, DEFAULT_OP_LABELS[kind]);
+	const unavailableReasonFor = (kind: AiImageJobKind): string | null => {
+		const capability = capabilityFor(kind);
+		if (capability && !capability.available) {
+			return (
+				capability.unavailableReason ??
+				msg(
+					"aiImage.requirement.providerUnavailable",
+					"This provider does not currently support the selected task.",
+				)
+			);
+		}
+		if (
+			kind !== "text-to-image" &&
+			(!selectedContext?.selectedNodeId ||
+				(selectedContext.selectedNodeKind !== undefined &&
+					selectedContext.selectedNodeKind !== "image"))
+		) {
+			return msg(
+				"aiImage.requirement.imageSelection",
+				"Select an image on the active page to use this task.",
+			);
+		}
+		return null;
+	};
+	const promptExamples = examples[ai.op] ?? [];
+	const selectionRequirement =
+		visibleOps.some((kind) => kind !== "text-to-image") &&
+		(!selectedContext?.selectedNodeId ||
+			(selectedContext.selectedNodeKind !== undefined &&
+				selectedContext.selectedNodeKind !== "image"))
+			? msg(
+					"aiImage.requirement.imageSelection",
+					"Select an image on the active page to use this task.",
+				)
+			: null;
 
 	const showPrompt =
 		ai.op === "text-to-image" ||
@@ -312,13 +392,7 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 	const [rewriteInstruction, setRewriteInstruction] = useState("");
 	const [layoutVariantCount, setLayoutVariantCount] = useState("");
 
-	const selectedKind = (() => {
-		try {
-			return getLayerContext()?.selectedNodeKind;
-		} catch {
-			return undefined;
-		}
-	})();
+	const selectedKind = selectedContext?.selectedNodeKind;
 	// Permissive when unknown (no selection info yet), matching the
 	// capabilities-omitted convention elsewhere in this panel.
 	const selectionLooksLikeText =
@@ -338,38 +412,82 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 				style={opListStyle}
 				data-testid="ai-image-op-list"
 			>
-				{visibleOps.map((kind) => (
-					<button
-						key={kind}
-						type="button"
-						aria-pressed={ai.op === kind}
-						style={opButtonStyle(ai.op === kind)}
-						onClick={() => ai.onOpChange(kind)}
-						data-testid={`ai-image-op-${kind}`}
-					>
-						{labelFor(kind)}
-					</button>
-				))}
+				{visibleOps.map((kind) => {
+					const unavailableReason = unavailableReasonFor(kind);
+					return (
+						<Button
+							key={kind}
+							type="button"
+							size="xs"
+							variant={ai.op === kind ? "default" : "outline"}
+							aria-pressed={ai.op === kind}
+							disabled={unavailableReason !== null}
+							title={unavailableReason ?? undefined}
+							style={opButtonStyle(ai.op === kind)}
+							onClick={() => ai.onOpChange(kind)}
+							data-testid={`ai-image-op-${kind}`}
+						>
+							{labelFor(kind)}
+						</Button>
+					);
+				})}
 			</div>
+			{visibleOps.length === 0 ? (
+				<Alert data-testid="ai-image-provider-empty">
+					<AlertTitle>
+						{msg("aiImage.provider.emptyTitle", "No AI image tasks available")}
+					</AlertTitle>
+					<AlertDescription>
+						{msg(
+							"aiImage.provider.emptyDescription",
+							"Configure a compatible provider to enable AI image tasks.",
+						)}
+					</AlertDescription>
+				</Alert>
+			) : null}
+			{selectionRequirement ? (
+				<p data-testid="ai-image-selection-requirement" style={noticeStyle}>
+					{selectionRequirement}
+				</p>
+			) : null}
 
 			<div style={bodyStyle}>
 				{showPrompt ? (
-					<label style={labelStyle}>
+					<Label style={labelStyle}>
 						{msg("aiImage.field.prompt")}
-						<textarea
+						<Textarea
 							data-testid="ai-image-prompt"
 							style={{ ...fieldStyle, minHeight: "64px", resize: "vertical" }}
 							placeholder={promptPlaceholderText}
 							value={ai.prompt}
 							onChange={(event) => ai.onPromptChange(event.target.value)}
 						/>
-					</label>
+					</Label>
+				) : null}
+
+				{showPrompt && promptExamples.length > 0 ? (
+					<div data-testid="ai-image-examples" style={opListStyle}>
+						<span style={noticeStyle}>
+							{msg("aiImage.panel.examples", "Try an example:")}
+						</span>
+						{promptExamples.map((example) => (
+							<Button
+								key={example}
+								type="button"
+								size="xs"
+								variant="outline"
+								onClick={() => ai.onPromptChange(example)}
+							>
+								{example}
+							</Button>
+						))}
+					</div>
 				) : null}
 
 				{showNegativePrompt ? (
-					<label style={labelStyle}>
+					<Label style={labelStyle}>
 						{msg("aiImage.field.negativePrompt")}
-						<input
+						<Input
 							data-testid="ai-image-negative-prompt"
 							style={fieldStyle}
 							value={ai.negativePrompt}
@@ -377,48 +495,49 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 								ai.onNegativePromptChange(event.target.value)
 							}
 						/>
-					</label>
+					</Label>
 				) : null}
 
 				{showSource ? (
-					<label style={labelStyle}>
+					<Label style={labelStyle}>
 						{msg("aiImage.field.sourceAssetId")}
-						<input
+						<Input
 							data-testid="ai-image-source"
 							style={fieldStyle}
 							value={ai.sourceAssetId}
+							placeholder={selectedContext?.selectedAssetId}
 							onChange={(event) => ai.onSourceAssetIdChange(event.target.value)}
 						/>
-					</label>
+					</Label>
 				) : null}
 
 				{showMask ? (
-					<label style={labelStyle}>
+					<Label style={labelStyle}>
 						{msg("aiImage.field.maskAssetId")}
-						<input
+						<Input
 							data-testid="ai-image-mask"
 							style={fieldStyle}
 							value={ai.maskAssetId}
 							onChange={(event) => ai.onMaskAssetIdChange(event.target.value)}
 						/>
-					</label>
+					</Label>
 				) : null}
 
 				{showTargetSize ? (
 					<>
-						<label style={labelStyle}>
+						<Label style={labelStyle}>
 							{msg("aiImage.field.targetWidth")}
-							<input
+							<Input
 								data-testid="ai-image-target-width"
 								inputMode="numeric"
 								style={fieldStyle}
 								value={ai.targetWidth}
 								onChange={(event) => ai.onTargetWidthChange(event.target.value)}
 							/>
-						</label>
-						<label style={labelStyle}>
+						</Label>
+						<Label style={labelStyle}>
 							{msg("aiImage.field.targetHeight")}
-							<input
+							<Input
 								data-testid="ai-image-target-height"
 								inputMode="numeric"
 								style={fieldStyle}
@@ -427,21 +546,21 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 									ai.onTargetHeightChange(event.target.value)
 								}
 							/>
-						</label>
+						</Label>
 					</>
 				) : null}
 
 				{showSeed ? (
-					<label style={labelStyle}>
+					<Label style={labelStyle}>
 						{msg("aiImage.field.seed")}
-						<input
+						<Input
 							data-testid="ai-image-seed"
 							inputMode="numeric"
 							style={fieldStyle}
 							value={ai.seed}
 							onChange={(event) => ai.onSeedChange(event.target.value)}
 						/>
-					</label>
+					</Label>
 				) : null}
 
 				{!ai.hasLayerContext ? (
@@ -451,13 +570,27 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 				) : null}
 
 				{ai.status === "pending" ? (
-					<p
+					<div
 						data-testid="ai-image-status"
 						style={noticeStyle}
 						aria-live="polite"
 					>
-						{msg("aiImage.status.generating")}
-					</p>
+						<p>
+							{msg("aiImage.status.generating")}
+							{ai.progress?.progress !== undefined
+								? ` ${Math.round(ai.progress.progress * 100)}%`
+								: ""}
+						</p>
+						<Progress
+							data-testid="ai-image-progress"
+							aria-label={msg("aiImage.status.progress", "AI image progress")}
+							value={
+								ai.progress?.progress === undefined
+									? null
+									: ai.progress.progress * 100
+							}
+						/>
+					</div>
 				) : null}
 
 				{ai.result?.status === "complete" ? (
@@ -468,33 +601,61 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 				) : null}
 
 				{ai.error ? (
-					<p data-testid="ai-image-error" style={errorStyle} role="alert">
-						{ai.error}
-					</p>
+					<Alert
+						data-testid="ai-image-error"
+						style={errorStyle}
+						variant="destructive"
+					>
+						<AlertTitle>
+							{msg("aiImage.error.title", "AI image task failed")}
+						</AlertTitle>
+						<AlertDescription>
+							{ai.error}
+							{ai.jobError?.code ? ` (${ai.jobError.code})` : ""}
+						</AlertDescription>
+					</Alert>
 				) : null}
 			</div>
 
 			<div style={actionRowStyle}>
-				<button
+				<Button
 					type="button"
 					data-testid="ai-image-run"
 					disabled={!ai.canRun}
+					aria-describedby={
+						ai.runDisabledReason ? "ai-image-run-requirement" : undefined
+					}
 					style={primaryButtonStyle(!ai.canRun)}
 					onClick={ai.onRun}
 				>
 					{runLabelText}
-				</button>
+				</Button>
 				{ai.status === "pending" ? (
-					<button
+					<Button
 						type="button"
 						data-testid="ai-image-cancel"
+						variant="outline"
 						style={cancelButtonStyle}
 						onClick={ai.onCancel}
 					>
 						{cancelLabelText}
-					</button>
+					</Button>
+				) : ai.canRetry ? (
+					<Button
+						type="button"
+						data-testid="ai-image-retry"
+						variant="outline"
+						onClick={ai.onRetry}
+					>
+						{retryLabelText}
+					</Button>
 				) : null}
 			</div>
+			{ai.runDisabledReason ? (
+				<p id="ai-image-run-requirement" style={noticeStyle}>
+					{ai.runDisabledReason}
+				</p>
+			) : null}
 
 			{designJobClient ? (
 				<div

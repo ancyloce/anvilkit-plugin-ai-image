@@ -30,6 +30,12 @@ import { type AiDesignJobRunner, useAiDesign } from "../use-ai-design.js";
 import { type AiImageJobRunner, useAiImage } from "../use-ai-image.js";
 
 const ARTBOARD = () => ({ artboardId: "art-1" });
+const ARTBOARD_WITH_IMAGE = () => ({
+	artboardId: "art-1",
+	selectedNodeId: "image-1",
+	selectedNodeKind: "image" as const,
+	selectedAssetId: "selected-asset",
+});
 const NO_CONTEXT = () => null;
 
 function completeResult(resultAssetId = "asset-1"): AiImageJobResult {
@@ -144,7 +150,7 @@ describe("useAiImage", () => {
 
 	it("gates canRun on per-op required fields and a layer context", () => {
 		const { result } = renderHook(() =>
-			useAiImage({ run: vi.fn(), getLayerContext: ARTBOARD }),
+			useAiImage({ run: vi.fn(), getLayerContext: ARTBOARD_WITH_IMAGE }),
 		);
 		// text-to-image needs a prompt.
 		expect(result.current.canRun).toBe(false);
@@ -152,14 +158,15 @@ describe("useAiImage", () => {
 		expect(result.current.canRun).toBe(true);
 		// variation needs a source asset id, not a prompt.
 		act(() => result.current.onOpChange("variation"));
-		expect(result.current.canRun).toBe(false);
+		// The selected image supplies its asset id without a duplicate manual input.
+		expect(result.current.canRun).toBe(true);
 		act(() => result.current.onSourceAssetIdChange("src-1"));
 		expect(result.current.canRun).toBe(true);
 	});
 
 	it("gates canRun for the FR-050 image-editing ops (UX-006)", () => {
 		const { result } = renderHook(() =>
-			useAiImage({ run: vi.fn(), getLayerContext: ARTBOARD }),
+			useAiImage({ run: vi.fn(), getLayerContext: ARTBOARD_WITH_IMAGE }),
 		);
 
 		// object-erase needs source + mask, no prompt.
@@ -564,7 +571,10 @@ describe("AiImagePanel", () => {
 
 	it("swaps the visible fields when the op changes", () => {
 		render(
-			<AiImagePanel jobClient={fakeJobClient()} getLayerContext={ARTBOARD} />,
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD_WITH_IMAGE}
+			/>,
 		);
 		expect(screen.getByTestId("ai-image-prompt")).toBeInTheDocument();
 
@@ -613,7 +623,10 @@ describe("AiImagePanel", () => {
 
 	it("dispatches a background-replace request (UX-006 'replace background')", () => {
 		render(
-			<AiImagePanel jobClient={fakeJobClient()} getLayerContext={ARTBOARD} />,
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD_WITH_IMAGE}
+			/>,
 		);
 		fireEvent.click(screen.getByTestId("ai-image-op-background-replace"));
 		fireEvent.change(screen.getByTestId("ai-image-source"), {
@@ -628,7 +641,10 @@ describe("AiImagePanel", () => {
 
 	it("dispatches a generative-expand request with target dimensions (UX-006 'expand background')", () => {
 		render(
-			<AiImagePanel jobClient={fakeJobClient()} getLayerContext={ARTBOARD} />,
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD_WITH_IMAGE}
+			/>,
 		);
 		fireEvent.click(screen.getByTestId("ai-image-op-generative-expand"));
 		expect(screen.getByTestId("ai-image-run")).toBeDisabled();
@@ -647,7 +663,10 @@ describe("AiImagePanel", () => {
 
 	it("shows the mask field for generative-fill and object-erase, mirroring inpaint", () => {
 		render(
-			<AiImagePanel jobClient={fakeJobClient()} getLayerContext={ARTBOARD} />,
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD_WITH_IMAGE}
+			/>,
 		);
 		fireEvent.click(screen.getByTestId("ai-image-op-generative-fill"));
 		expect(screen.getByTestId("ai-image-mask")).toBeInTheDocument();
@@ -663,7 +682,7 @@ describe("AiImagePanel", () => {
 		render(
 			<AiImagePanel
 				jobClient={fakeJobClient(run)}
-				getLayerContext={ARTBOARD}
+				getLayerContext={ARTBOARD_WITH_IMAGE}
 			/>,
 		);
 
@@ -687,6 +706,116 @@ describe("AiImagePanel", () => {
 			targetWidth: 1600,
 			targetHeight: 900,
 		});
+	});
+
+	it("fills the prompt from an example without starting a job", () => {
+		const run = vi.fn<AiImageJobRunner>();
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient(run)}
+				getLayerContext={ARTBOARD}
+				examples={{ "text-to-image": ["A paper-cut sunrise"] }}
+			/>,
+		);
+
+		fireEvent.click(
+			screen.getByRole("button", { name: "A paper-cut sunrise" }),
+		);
+		expect(screen.getByTestId("ai-image-prompt")).toHaveValue(
+			"A paper-cut sunrise",
+		);
+		expect(run).not.toHaveBeenCalled();
+	});
+
+	it("disables image-editing tasks with an actionable selection requirement", () => {
+		render(
+			<AiImagePanel jobClient={fakeJobClient()} getLayerContext={ARTBOARD} />,
+		);
+
+		expect(screen.getByTestId("ai-image-op-bg-remove")).toBeDisabled();
+		expect(
+			screen.getByTestId("ai-image-selection-requirement"),
+		).toHaveTextContent("Select an image");
+	});
+
+	it("uses discovered provider capabilities and explains temporary unavailability", () => {
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient()}
+				getLayerContext={ARTBOARD_WITH_IMAGE}
+				providerDescriptor={{
+					providerId: "fixture",
+					capabilities: [
+						{ kind: "text-to-image", available: true },
+						{
+							kind: "generative-expand",
+							available: false,
+							unavailableReason: "Upgrade the provider plan to expand images.",
+						},
+					],
+				}}
+			/>,
+		);
+
+		expect(
+			screen.queryByTestId("ai-image-op-bg-remove"),
+		).not.toBeInTheDocument();
+		expect(screen.getByTestId("ai-image-op-generative-expand")).toBeDisabled();
+		expect(screen.getByTestId("ai-image-op-generative-expand")).toHaveAttribute(
+			"title",
+			"Upgrade the provider plan to expand images.",
+		);
+	});
+
+	it("renders provider progress and supports retry after a terminal error", async () => {
+		let attempts = 0;
+		const run = vi.fn<AiImageJobRunner>(async (_request, _context, options) => {
+			attempts += 1;
+			options?.onProgress?.({
+				phase: "processing",
+				progress: 0.6,
+				updatedAt: attempts,
+			});
+			if (attempts === 1) {
+				return {
+					jobId: "job-1",
+					status: "error",
+					startedAt: 0,
+					error: {
+						code: "RATE_LIMITED",
+						message: "Try again shortly.",
+						category: "rate-limit",
+						retryable: true,
+					},
+				};
+			}
+			return completeResult("asset-retried");
+		});
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient(run)}
+				getLayerContext={ARTBOARD}
+			/>,
+		);
+		fireEvent.change(screen.getByTestId("ai-image-prompt"), {
+			target: { value: "a cat" },
+		});
+
+		fireEvent.click(screen.getByTestId("ai-image-run"));
+		await waitFor(() =>
+			expect(screen.getByTestId("ai-image-retry")).toBeInTheDocument(),
+		);
+		expect(screen.getByTestId("ai-image-error")).toHaveTextContent(
+			"RATE_LIMITED",
+		);
+
+		fireEvent.click(screen.getByTestId("ai-image-retry"));
+		await waitFor(() =>
+			expect(screen.getByTestId("ai-image-result")).toHaveTextContent(
+				"asset-retried",
+			),
+		);
+		expect(run).toHaveBeenCalledTimes(2);
 	});
 });
 
