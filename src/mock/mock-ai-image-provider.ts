@@ -58,9 +58,19 @@ export function createMockAiImageProvider(
 
 	return async (request, _context, options) => {
 		const startedAt = now();
+		options?.onProgress?.({
+			phase: "queued",
+			progress: 0,
+			updatedAt: startedAt,
+		});
 		// Abort-aware even when delayMs is 0: an already-aborted signal
 		// rejects with an AbortError so the client maps it to cancelled.
 		await defaultSleep(delayMs, options?.signal);
+		options?.onProgress?.({
+			phase: "processing",
+			progress: 0.75,
+			updatedAt: now(),
+		});
 
 		if (opts.simulate === "retryable") {
 			throw new RetryableError(
@@ -90,6 +100,11 @@ export function createMockAiImageProvider(
 			resultAssetId: resolveResultAssetId(request, opts.resultAssetId),
 			startedAt,
 			finishedAt: now(),
+			metadata: {
+				mimeType: "image/png",
+				safety: { status: "approved" },
+				cost: { status: "final", credits: 0 },
+			},
 		};
 		return result;
 	};

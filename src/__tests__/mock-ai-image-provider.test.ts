@@ -42,6 +42,24 @@ describe("createMockAiImageProvider", () => {
 		expect(result.status).toBe("complete");
 	});
 
+	it("emits normalized progress and zero-cost safety metadata", async () => {
+		const provider = createMockAiImageProvider();
+		const phases: string[] = [];
+
+		const result = await provider(
+			{ kind: "text-to-image", prompt: "x" },
+			context,
+			{ onProgress: ({ phase }) => phases.push(phase) },
+		);
+
+		expect(phases).toEqual(["queued", "processing"]);
+		expect(result.status).toBe("complete");
+		if (result.status === "complete") {
+			expect(result.metadata?.safety.status).toBe("approved");
+			expect(result.metadata?.cost?.credits).toBe(0);
+		}
+	});
+
 	it("accepts a custom resultAssetId resolver", async () => {
 		const provider = createMockAiImageProvider({
 			resultAssetId: (req) => `asset-for-${req.kind}`,

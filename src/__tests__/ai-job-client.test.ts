@@ -55,6 +55,18 @@ describe("createAiJobClient", () => {
 		});
 	});
 
+	it("forwards normalized provider progress to the caller", async () => {
+		const provider = createMockAiImageProvider({ delayMs: 0 });
+		const client = createAiJobClient({ provider, ...deterministic });
+		const phases: string[] = [];
+
+		await client.run(request, context, {
+			onProgress: ({ phase }) => phases.push(phase),
+		});
+
+		expect(phases).toEqual(["queued", "processing"]);
+	});
+
 	it("retries on RetryableError, then succeeds", async () => {
 		let attempts = 0;
 		const provider: AiImageProvider = async () => {
