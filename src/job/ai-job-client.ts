@@ -16,6 +16,7 @@
  */
 
 import type {
+	AiImageJobProgress,
 	AiImageJobRequest,
 	AiImageJobResult,
 	AiLayerContext,
@@ -33,6 +34,7 @@ export interface AiJobResultLike {
 	status: "pending" | "complete" | "error" | "cancelled";
 	startedAt: number;
 	finishedAt?: number;
+	progress?: AiImageJobProgress;
 }
 
 /**
@@ -54,7 +56,10 @@ export type AiJobProviderFn<
 > = (
 	request: TRequest,
 	context: TContext,
-	options?: { signal?: AbortSignal },
+	options?: {
+		signal?: AbortSignal;
+		onProgress?: (progress: AiImageJobProgress) => void;
+	},
 ) => Promise<TResult>;
 
 export interface AiJobClientOptions<
@@ -102,6 +107,8 @@ export interface AiJobClientOptions<
 export interface AiJobRunOptions {
 	/** Aborts the in-flight provider call, retry sleeps, and polling. */
 	readonly signal?: AbortSignal;
+	/** Receives normalized provider and polling progress. */
+	readonly onProgress?: (progress: AiImageJobProgress) => void;
 }
 
 export interface AiJobClient<
@@ -191,8 +198,12 @@ export function createAiJobClient<
 		initial: TResult,
 		startedAt: number,
 		signal: AbortSignal | undefined,
+		onProgress: ((progress: AiImageJobProgress) => void) | undefined,
 	): Promise<TResult> {
 		let current = initial;
+		if (current.progress) {
+			onProgress?.(current.progress);
+		}
 		const deadline =
 			pollTimeoutMs !== undefined ? now() + pollTimeoutMs : undefined;
 
@@ -214,6 +225,9 @@ export function createAiJobClient<
 			try {
 				await sleep(pollIntervalMs, signal);
 				current = await pollFn(current.jobId, { signal });
+				if (current.progress) {
+					onProgress?.(current.progress);
+				}
 			} catch (error) {
 				if (isAbortError(error) || signal?.aborted) {
 					return cancelled(current.jobId, startedAt);
@@ -227,6 +241,7 @@ export function createAiJobClient<
 	return {
 		async run(request, context, runOptions) {
 			const signal = runOptions?.signal;
+			const onProgress = runOptions?.onProgress;
 			const startedAt = now();
 
 			if (signal?.aborted) {
@@ -235,10 +250,17 @@ export function createAiJobClient<
 
 			let result: TResult;
 			try {
-				result = await withRetry(() => provider(request, context, { signal }), {
-					...retryOptions,
-					signal,
-				});
+				result = await withRetry(
+					() =>
+						provider(request, context, {
+							signal,
+							...(onProgress ? { onProgress } : {}),
+						}),
+					{
+						...retryOptions,
+						signal,
+					},
+				);
 			} catch (error) {
 				if (isAbortError(error) || signal?.aborted) {
 					return cancelled(nextFallbackJobId(), startedAt);
@@ -250,7 +272,7 @@ export function createAiJobClient<
 				return result;
 			}
 
-			return pollToTerminal(poll, result, startedAt, signal);
+			return pollToTerminal(poll, result, startedAt, signal, onProgress);
 		},
 	};
 }
