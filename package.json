@@ -37,6 +37,36 @@
 				"default": "./dist/react/index.cjs"
 			}
 		},
+		"./evaluation": {
+			"import": {
+				"types": "./dist/evaluation/index.d.ts",
+				"default": "./dist/evaluation/index.js"
+			},
+			"require": {
+				"types": "./dist/cjs/evaluation/index.d.cts",
+				"default": "./dist/evaluation/index.cjs"
+			}
+		},
+		"./job-session": {
+			"import": {
+				"types": "./dist/job/ai-image-job-session.d.ts",
+				"default": "./dist/job/ai-image-job-session.js"
+			},
+			"require": {
+				"types": "./dist/cjs/job/ai-image-job-session.d.cts",
+				"default": "./dist/job/ai-image-job-session.cjs"
+			}
+		},
+		"./telemetry": {
+			"import": {
+				"types": "./dist/telemetry/index.d.ts",
+				"default": "./dist/telemetry/index.js"
+			},
+			"require": {
+				"types": "./dist/cjs/telemetry/index.d.cts",
+				"default": "./dist/telemetry/index.cjs"
+			}
+		},
 		"./mask": {
 			"import": {
 				"types": "./dist/mask/index.d.ts",
