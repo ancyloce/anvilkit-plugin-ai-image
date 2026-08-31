@@ -40,8 +40,16 @@ export interface CreateAiImageSidebarPluginOptions {
 	readonly capabilities?: AiProviderCapabilities;
 	/** Detailed image capability discovery used for disabled states and limits. */
 	readonly providerDescriptor?: AiImageProviderDescriptor;
+	/** Document-scoped persistence and recovery configuration. */
+	readonly jobSession?: AiImagePanelProps["jobSession"];
+	/** Content-free lifecycle and decision telemetry. */
+	readonly telemetry?: AiImagePanelProps["telemetry"];
 	/** Op selected on first render. Defaults to `"text-to-image"`. */
 	readonly defaultOp?: AiImageJobKind;
+	/** Explicit host seam for applying a preview as a replacement or copy. */
+	readonly applyResult?: AiImagePanelProps["applyResult"];
+	/** Resolves source and result asset ids for the comparison preview. */
+	readonly resolveAssetUrl?: AiImagePanelProps["resolveAssetUrl"];
 	/** Drives the FR-053 design actions (rewrite text, layout variants, apply brand); omitted hides that section. */
 	readonly designJobClient?: AiJobClient<
 		AiDesignJobRequest,
@@ -62,6 +70,9 @@ export interface CreateAiImageSidebarPluginOptions {
 		| "runLabel"
 		| "cancelLabel"
 		| "retryLabel"
+		| "replaceLabel"
+		| "insertCopyLabel"
+		| "discardLabel"
 		| "opLabels"
 		| "noContextLabel"
 	>;
@@ -101,7 +112,11 @@ export function createAiImageSidebarPlugin(
 				getLayerContext={getLayerContext}
 				capabilities={options.capabilities}
 				providerDescriptor={options.providerDescriptor}
+				jobSession={options.jobSession}
+				telemetry={options.telemetry}
 				defaultOp={options.defaultOp}
+				applyResult={options.applyResult}
+				resolveAssetUrl={options.resolveAssetUrl}
 				designJobClient={options.designJobClient}
 				designCommit={options.designCommit}
 				brandKit={options.brandKit}

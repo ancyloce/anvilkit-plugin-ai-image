@@ -6,6 +6,11 @@ import {
 	type CommitCanvasCommandFn,
 	commitImageReplace,
 } from "../commit/commit-image-replace.js";
+import type { AiImageJobSessionCoordinator } from "../job/index.js";
+import type {
+	AiImageTelemetry,
+	AiImageTelemetryOutcome,
+} from "../telemetry/index.js";
 import type {
 	AiImageCapability,
 	AiImageJobError,
@@ -42,6 +47,17 @@ export interface AiImageResultPreview {
 	readonly result: Extract<AiImageJobResult, { status: "complete" }>;
 }
 
+export interface AiImageJobRecoveryOptions {
+	readonly documentId: string;
+	readonly coordinator: AiImageJobSessionCoordinator;
+	/** False for an offline-capable local/mock provider. Defaults to true. */
+	readonly requiresNetwork?: boolean;
+	/** Live host connectivity. A lost connection moves a network job to retry. */
+	readonly online?: boolean;
+	/** Live authorization. Revocation cancels work and invalidates its preview. */
+	readonly permissionGranted?: boolean;
+}
+
 export interface UseAiImageOptions {
 	/**
 	 * Drives the job. Wire this to `jobClient.run` (recommended — keeps
@@ -63,6 +79,12 @@ export interface UseAiImageOptions {
 	readonly defaultOp?: AiImageJobKind;
 	/** Detailed provider availability and input constraints for the visible ops. */
 	readonly capabilities?: readonly AiImageCapability[];
+	/** Optional document-scoped persistence and recovery coordinator. */
+	readonly jobSession?: AiImageJobRecoveryOptions;
+	/** Optional content-free lifecycle and decision telemetry. */
+	readonly telemetry?: AiImageTelemetry;
+	/** Clock for duration telemetry. Defaults to `Date.now`. */
+	readonly now?: () => number;
 	/** Host application seam for explicit replace/insert-copy application. */
 	readonly applyResult?: (
 		preview: AiImageResultPreview,
@@ -291,6 +313,44 @@ function requestSourceAssetId(request: AiImageJobRequest): string | null {
 	}
 }
 
+function fieldsFromRequest(request: AiImageJobRequest): AiImageFields {
+	return {
+		prompt: "prompt" in request ? (request.prompt ?? "") : "",
+		negativePrompt:
+			"negativePrompt" in request ? (request.negativePrompt ?? "") : "",
+		sourceAssetId: requestSourceAssetId(request) ?? "",
+		maskAssetId: "maskAssetId" in request ? request.maskAssetId : "",
+		targetWidth: "targetWidth" in request ? String(request.targetWidth) : "",
+		targetHeight: "targetHeight" in request ? String(request.targetHeight) : "",
+		seed: "seed" in request ? String(request.seed ?? "") : "",
+	};
+}
+
+function safetyError(
+	result: Extract<AiImageJobResult, { status: "complete" }>,
+): AiImageJobError | null {
+	const safety = result.metadata?.safety;
+	switch (safety?.status) {
+		case "blocked":
+		case "review-required":
+			return {
+				code: safety.code,
+				message: safety.message,
+				category: "provider-policy",
+				retryable: false,
+			};
+		default:
+			return null;
+	}
+}
+
+interface TelemetryAttempt {
+	readonly taskKind: AiImageJobKind;
+	readonly startedAt: number;
+	readonly retryCount: number;
+	finished: boolean;
+}
+
 /**
  * Headless state container for {@link AiImagePanel}.
  *
@@ -306,6 +366,9 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		getLayerContext,
 		defaultOp = "text-to-image",
 		capabilities,
+		jobSession,
+		telemetry,
+		now = Date.now,
 		applyResult,
 		commit,
 		postProcess,
@@ -329,6 +392,8 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 
 	const abortRef = useRef<AbortController | null>(null);
 	const previewRef = useRef<AiImageResultPreview | null>(null);
+	const telemetryAttemptRef = useRef<TelemetryAttempt | null>(null);
+	const retryCountRef = useRef(0);
 
 	// Keep the latest inputs + injected callbacks in a ref so `onRun` is
 	// referentially stable and never reads a stale closure, regardless of
@@ -343,6 +408,9 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		targetHeight,
 		seed,
 		capabilities,
+		jobSession,
+		telemetry,
+		now,
 		applyResult,
 		run,
 		getLayerContext,
@@ -360,6 +428,9 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 			targetHeight,
 			seed,
 			capabilities,
+			jobSession,
+			telemetry,
+			now,
 			applyResult,
 			run,
 			getLayerContext,
@@ -369,6 +440,9 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 	}, [
 		commit,
 		capabilities,
+		jobSession,
+		telemetry,
+		now,
 		applyResult,
 		getLayerContext,
 		maskAssetId,
@@ -419,6 +493,63 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		msgRef.current = msg;
 	}, [msg]);
 
+	useEffect(() => {
+		if (!jobSession) return;
+		const synchronize = (): void => {
+			const session = jobSession.coordinator.recover(jobSession.documentId);
+			if (!session) return;
+			const fields = fieldsFromRequest(session.request);
+			setOp(session.request.kind);
+			setPrompt(fields.prompt);
+			setNegativePrompt(fields.negativePrompt);
+			setSourceAssetId(fields.sourceAssetId);
+			setMaskAssetId(fields.maskAssetId);
+			setTargetWidth(fields.targetWidth);
+			setTargetHeight(fields.targetHeight);
+			setSeed(fields.seed);
+			setProgress(session.progress ?? null);
+			setStatus(session.status === "pending" ? "pending" : "idle");
+			if (session.status === "complete" && session.result) {
+				const recoveredPreview: AiImageResultPreview = {
+					request: session.request,
+					context: session.context,
+					originalAssetId: session.originalAssetId,
+					result: session.result,
+				};
+				previewRef.current = recoveredPreview;
+				setPreview(recoveredPreview);
+				setResult(session.result);
+				setError(null);
+				setJobError(null);
+				return;
+			}
+			previewRef.current = null;
+			setPreview(null);
+			setResult(null);
+			if (session.error) {
+				setJobError(session.error);
+				setError(session.error.message);
+			} else {
+				setJobError(null);
+				setError(null);
+			}
+		};
+		synchronize();
+		return jobSession.coordinator.subscribe(jobSession.documentId, synchronize);
+	}, [jobSession]);
+
+	useEffect(() => {
+		if (!jobSession) return;
+		jobSession.coordinator.setOnline(
+			jobSession.documentId,
+			jobSession.online ?? true,
+		);
+		jobSession.coordinator.setPermission(
+			jobSession.documentId,
+			jobSession.permissionGranted ?? true,
+		);
+	}, [jobSession]);
+
 	const capability = capabilities?.find(({ kind }) => kind === op);
 	const imageSelectionRequired = op !== "text-to-image";
 	const runDisabledReason = (() => {
@@ -427,6 +558,18 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		}
 		if (!layerContext) {
 			return msg("aiImage.panel.noContext", "Open a canvas page to continue.");
+		}
+		if (jobSession?.permissionGranted === false) {
+			return msg(
+				"aiImage.requirement.permission",
+				"Ask an owner for AI image permission before continuing.",
+			);
+		}
+		if (jobSession?.online === false && jobSession.requiresNetwork !== false) {
+			return msg(
+				"aiImage.requirement.offline",
+				"Reconnect to run this AI image task.",
+			);
 		}
 		if (capability && !capability.available) {
 			return (
@@ -468,15 +611,44 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 	const canReplace =
 		preview !== null &&
 		applyStatus === "idle" &&
+		jobSession?.permissionGranted !== false &&
 		(Boolean(applyResult) ||
 			(Boolean(commit) &&
 				preview.originalAssetId !== null &&
 				Boolean(preview.context.selectedNodeId)));
 	const canInsertCopy =
-		preview !== null && applyStatus === "idle" && Boolean(applyResult);
+		preview !== null &&
+		applyStatus === "idle" &&
+		jobSession?.permissionGranted !== false &&
+		Boolean(applyResult);
+	const finishTelemetry = (
+		outcome: AiImageTelemetryOutcome,
+		errorCategory?: AiImageJobError["category"],
+	): void => {
+		const attempt = telemetryAttemptRef.current;
+		const snapshot = latest.current;
+		if (!attempt || attempt.finished || !snapshot.telemetry) return;
+		attempt.finished = true;
+		const timestamp = snapshot.now();
+		snapshot.telemetry.emit({
+			name: "ai_image_task",
+			phase: "finished",
+			taskKind: attempt.taskKind,
+			timestamp,
+			durationMs: Math.max(0, timestamp - attempt.startedAt),
+			outcome,
+			retryCount: attempt.retryCount,
+			...(errorCategory ? { errorCategory } : {}),
+		});
+	};
 
 	const onCancel = useCallback((): void => {
+		const recovery = latest.current.jobSession;
+		if (recovery) {
+			recovery.coordinator.cancel(recovery.documentId);
+		}
 		abortRef.current?.abort();
+		finishTelemetry("cancelled");
 	}, []);
 
 	const onRun = useCallback((): void => {
@@ -510,6 +682,31 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		abortRef.current?.abort();
 		const controller = new AbortController();
 		abortRef.current = controller;
+		let retryCount = retryCountRef.current;
+		if (snapshot.jobSession) {
+			const session = snapshot.jobSession.coordinator.begin({
+				documentId: snapshot.jobSession.documentId,
+				request,
+				context,
+				controller,
+				requiresNetwork: snapshot.jobSession.requiresNetwork ?? true,
+			});
+			retryCount = session.retryCount;
+		}
+		const startedAt = snapshot.now();
+		telemetryAttemptRef.current = {
+			taskKind: request.kind,
+			startedAt,
+			retryCount,
+			finished: false,
+		};
+		snapshot.telemetry?.emit({
+			name: "ai_image_task",
+			phase: "started",
+			taskKind: request.kind,
+			timestamp: startedAt,
+			retryCount,
+		});
 
 		snapshot
 			.run(request, context, {
@@ -517,6 +714,12 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 				onProgress: (nextProgress) => {
 					if (abortRef.current === controller) {
 						setProgress(nextProgress);
+						if (snapshot.jobSession) {
+							snapshot.jobSession.coordinator.progress(
+								snapshot.jobSession.documentId,
+								nextProgress,
+							);
+						}
 					}
 				},
 			})
@@ -524,9 +727,37 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 				if (abortRef.current !== controller) {
 					return;
 				}
+				if (controller.signal.aborted) {
+					return;
+				}
+				if (next.status === "complete") {
+					const blocked = safetyError(next);
+					if (blocked) {
+						if (snapshot.jobSession) {
+							snapshot.jobSession.coordinator.fail(
+								snapshot.jobSession.documentId,
+								blocked,
+							);
+						}
+						setResult(null);
+						setJobError(blocked);
+						setError(blocked.message);
+						setPreview(null);
+						previewRef.current = null;
+						finishTelemetry("policy-blocked", blocked.category);
+						return;
+					}
+				}
+				if (snapshot.jobSession) {
+					snapshot.jobSession.coordinator.settle(
+						snapshot.jobSession.documentId,
+						next,
+					);
+				}
 				if (next.status === "cancelled") {
 					// User-cancelled — leave the form intact, surface nothing.
 					setProgress(null);
+					finishTelemetry("cancelled");
 					return;
 				}
 				setResult(next);
@@ -535,6 +766,7 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 					setError(
 						next.error?.message ?? msgRef.current("aiImage.error.jobFailed"),
 					);
+					finishTelemetry("error", next.error.category);
 					return;
 				}
 
@@ -549,6 +781,7 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 				};
 				previewRef.current = nextPreview;
 				setPreview(nextPreview);
+				finishTelemetry("success");
 			})
 			.catch((err: unknown) => {
 				if (abortRef.current !== controller) {
@@ -559,13 +792,21 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 					return;
 				}
 				const message = err instanceof Error ? err.message : String(err);
-				setJobError({
+				const normalizedError: AiImageJobError = {
 					code: "UNEXPECTED_PROVIDER_ERROR",
 					message,
 					category: "unknown",
 					retryable: true,
-				});
+				};
+				setJobError(normalizedError);
+				if (snapshot.jobSession) {
+					snapshot.jobSession.coordinator.fail(
+						snapshot.jobSession.documentId,
+						normalizedError,
+					);
+				}
 				setError(message);
+				finishTelemetry("error", normalizedError.category);
 			})
 			.finally(() => {
 				// Only the still-current run resets the shared status; a
@@ -577,7 +818,10 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 			});
 		// `latest` ref makes every dependency stable; intentionally `[]`.
 	}, []);
-	const onRetry = onRun;
+	const onRetry = useCallback((): void => {
+		retryCountRef.current += 1;
+		onRun();
+	}, [onRun]);
 	const onApply = useCallback((mode: AiImageApplyMode): void => {
 		const currentPreview = previewRef.current;
 		if (!currentPreview) return;
@@ -593,7 +837,9 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 			const nodeId = currentPreview.context.selectedNodeId;
 			const fromAssetId = currentPreview.originalAssetId;
 			if (!snapshot.commit || !nodeId || !fromAssetId) {
-				throw new Error("Replace requires a selected image and commit adapter.");
+				throw new Error(
+					"Replace requires a selected image and commit adapter.",
+				);
 			}
 			let toAssetId = currentPreview.result.resultAssetId;
 			if (snapshot.postProcess) {
@@ -615,6 +861,24 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		setError(null);
 		void apply()
 			.then(() => {
+				const attempt = telemetryAttemptRef.current;
+				const telemetrySnapshot = latest.current;
+				if (attempt && telemetrySnapshot.telemetry) {
+					const timestamp = telemetrySnapshot.now();
+					telemetrySnapshot.telemetry.emit({
+						name: "ai_image_task",
+						phase: "decision",
+						taskKind: attempt.taskKind,
+						timestamp,
+						durationMs: Math.max(0, timestamp - attempt.startedAt),
+						retryCount: attempt.retryCount,
+						decision: mode,
+					});
+				}
+				const recovery = latest.current.jobSession;
+				if (recovery) {
+					recovery.coordinator.clear(recovery.documentId);
+				}
 				previewRef.current = null;
 				setPreview(null);
 				setResult(null);
@@ -625,6 +889,24 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 			.finally(() => setApplyStatus("idle"));
 	}, []);
 	const onDiscard = useCallback((): void => {
+		const attempt = telemetryAttemptRef.current;
+		const telemetrySnapshot = latest.current;
+		if (attempt && telemetrySnapshot.telemetry) {
+			const timestamp = telemetrySnapshot.now();
+			telemetrySnapshot.telemetry.emit({
+				name: "ai_image_task",
+				phase: "decision",
+				taskKind: attempt.taskKind,
+				timestamp,
+				durationMs: Math.max(0, timestamp - attempt.startedAt),
+				retryCount: attempt.retryCount,
+				decision: "discard",
+			});
+		}
+		const recovery = latest.current.jobSession;
+		if (recovery) {
+			recovery.coordinator.clear(recovery.documentId);
+		}
 		previewRef.current = null;
 		setPreview(null);
 		setResult(null);
@@ -632,6 +914,12 @@ export function useAiImage(options: UseAiImageOptions): UseAiImageResult {
 		setJobError(null);
 	}, []);
 	const onOpChange = useCallback((next: AiImageJobKind): void => {
+		retryCountRef.current = 0;
+		telemetryAttemptRef.current = null;
+		const recovery = latest.current.jobSession;
+		if (recovery) {
+			recovery.coordinator.clear(recovery.documentId);
+		}
 		setOp(next);
 		setError(null);
 		setJobError(null);

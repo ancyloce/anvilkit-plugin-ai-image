@@ -90,6 +90,10 @@ export interface AiImagePanelProps {
 	readonly capabilities?: AiProviderCapabilities;
 	/** Detailed discovery result with availability, constraints, and costs. */
 	readonly providerDescriptor?: AiImageProviderDescriptor;
+	/** Document-scoped persistence, recovery, connectivity, and permission state. */
+	readonly jobSession?: UseAiImageOptions["jobSession"];
+	/** Content-free lifecycle and apply/discard telemetry. */
+	readonly telemetry?: UseAiImageOptions["telemetry"];
 	/** Op selected on first render. Defaults to `"text-to-image"`. */
 	readonly defaultOp?: AiImageJobKind;
 	/**
@@ -97,6 +101,10 @@ export interface AiImagePanelProps {
 	 * when a non-`text-to-image` job completes against the selected node.
 	 */
 	readonly commit?: CommitCanvasCommandFn;
+	/** Explicit host adapter for applying a preview as a replace or inserted copy. */
+	readonly applyResult?: UseAiImageOptions["applyResult"];
+	/** Resolves a document or provider asset id into previewable image bytes. */
+	readonly resolveAssetUrl?: (assetId: string) => string | undefined;
 	/**
 	 * Optional — forwarded to {@link useAiImage}. Transforms a completed result
 	 * into the final asset id to commit (e.g. via `createPostProcessPipeline`).
@@ -123,6 +131,9 @@ export interface AiImagePanelProps {
 	readonly runLabel?: string;
 	readonly cancelLabel?: string;
 	readonly retryLabel?: string;
+	readonly replaceLabel?: string;
+	readonly insertCopyLabel?: string;
+	readonly discardLabel?: string;
 	readonly opLabels?: Partial<Record<AiImageJobKind, string>>;
 	readonly examples?: Partial<Record<AiImageJobKind, readonly string[]>>;
 	readonly noContextLabel?: string;
@@ -241,6 +252,22 @@ const resultStyle: CSSProperties = {
 	wordBreak: "break-word",
 };
 
+const previewStyle: CSSProperties = {
+	display: "grid",
+	gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+	gap: "8px",
+};
+
+const previewImageStyle: CSSProperties = {
+	display: "block",
+	width: "100%",
+	aspectRatio: "1 / 1",
+	objectFit: "contain",
+	borderRadius: "var(--ak-studio-radius-sm, 6px)",
+	background: "var(--ak-studio-muted, #f4f4f5)",
+	outline: "1px solid color-mix(in srgb, currentColor 12%, transparent)",
+};
+
 /**
  * The AI-image sidebar surface. A presentational shell over
  * {@link useAiImage}: an op selector, the per-op input fields, a
@@ -255,8 +282,12 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 		getLayerContext,
 		capabilities,
 		providerDescriptor,
+		jobSession,
+		telemetry,
 		defaultOp,
 		commit,
+		applyResult,
+		resolveAssetUrl,
 		postProcess,
 		designJobClient,
 		designCommit,
@@ -266,6 +297,9 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 		runLabel,
 		cancelLabel,
 		retryLabel,
+		replaceLabel,
+		insertCopyLabel,
+		discardLabel,
 		opLabels,
 		examples = DEFAULT_PROMPT_EXAMPLES,
 		noContextLabel,
@@ -299,6 +333,12 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 	const runLabelText = runLabel ?? msg("aiImage.panel.run");
 	const cancelLabelText = cancelLabel ?? msg("aiImage.panel.cancel");
 	const retryLabelText = retryLabel ?? msg("aiImage.panel.retry", "Retry task");
+	const replaceLabelText =
+		replaceLabel ?? msg("aiImage.preview.replace", "Replace original");
+	const insertCopyLabelText =
+		insertCopyLabel ?? msg("aiImage.preview.insertCopy", "Insert as copy");
+	const discardLabelText =
+		discardLabel ?? msg("aiImage.preview.discard", "Discard");
 	const noContextLabelText = noContextLabel ?? msg("aiImage.panel.noContext");
 	let selectedContext: AiLayerContext | null = null;
 	try {
@@ -313,9 +353,18 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 		getLayerContext,
 		defaultOp: resolvedDefaultOp,
 		capabilities: detailedCapabilities,
+		jobSession,
+		telemetry,
+		applyResult,
 		commit,
 		postProcess,
 	});
+	const originalPreviewUrl = ai.preview?.originalAssetId
+		? resolveAssetUrl?.(ai.preview.originalAssetId)
+		: undefined;
+	const resultPreviewUrl = ai.preview
+		? resolveAssetUrl?.(ai.preview.result.resultAssetId)
+		: undefined;
 
 	const labelFor = (kind: AiImageJobKind): string =>
 		opLabels?.[kind] ?? msg(`aiImage.op.${kind}`, DEFAULT_OP_LABELS[kind]);
@@ -593,11 +642,83 @@ export function AiImagePanel(props: AiImagePanelProps): ReactElement {
 					</div>
 				) : null}
 
-				{ai.result?.status === "complete" ? (
-					<p data-testid="ai-image-result" style={resultStyle}>
-						{msg("aiImage.result.prefix")}
-						{ai.result.resultAssetId}
-					</p>
+				{ai.preview ? (
+					<section
+						data-testid="ai-image-preview"
+						aria-label={msg("aiImage.preview.title", "Review AI image result")}
+						style={{ display: "flex", flexDirection: "column", gap: "8px" }}
+					>
+						<div style={previewStyle}>
+							{ai.preview.originalAssetId ? (
+								<figure style={{ margin: 0 }}>
+									<figcaption style={noticeStyle}>
+										{msg("aiImage.preview.original", "Original")}
+									</figcaption>
+									{originalPreviewUrl ? (
+										<img
+											data-testid="ai-image-preview-original"
+											src={originalPreviewUrl}
+											alt={msg("aiImage.preview.originalAlt", "Original image")}
+											style={previewImageStyle}
+										/>
+									) : (
+										<p style={resultStyle}>{ai.preview.originalAssetId}</p>
+									)}
+								</figure>
+							) : null}
+							<figure data-testid="ai-image-result" style={{ margin: 0 }}>
+								<figcaption style={noticeStyle}>
+									{msg("aiImage.preview.result", "Result")}
+								</figcaption>
+								{resultPreviewUrl ? (
+									<img
+										data-testid="ai-image-preview-result"
+										src={resultPreviewUrl}
+										alt={msg("aiImage.preview.resultAlt", "Generated result")}
+										style={previewImageStyle}
+									/>
+								) : (
+									<p style={resultStyle}>
+										{msg("aiImage.result.prefix")}
+										{ai.preview.result.resultAssetId}
+									</p>
+								)}
+							</figure>
+						</div>
+						<div style={actionRowStyle}>
+							<Button
+								type="button"
+								data-testid="ai-image-preview-replace"
+								disabled={!ai.canReplace}
+								onClick={() => ai.onApply("replace")}
+							>
+								{replaceLabelText}
+							</Button>
+							<Button
+								type="button"
+								data-testid="ai-image-preview-insert-copy"
+								variant="outline"
+								disabled={!ai.canInsertCopy}
+								onClick={() => ai.onApply("insert-copy")}
+							>
+								{insertCopyLabelText}
+							</Button>
+							<Button
+								type="button"
+								data-testid="ai-image-preview-discard"
+								variant="ghost"
+								disabled={ai.applyStatus === "applying"}
+								onClick={ai.onDiscard}
+							>
+								{discardLabelText}
+							</Button>
+						</div>
+						{ai.applyStatus === "applying" ? (
+							<p aria-live="polite" style={noticeStyle}>
+								{msg("aiImage.preview.applying", "Applying result…")}
+							</p>
+						) : null}
+					</section>
 				) : null}
 
 				{ai.error ? (

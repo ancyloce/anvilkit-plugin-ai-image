@@ -21,7 +21,10 @@ export {
 	useAiDesign,
 } from "./use-ai-design.js";
 export {
+	type AiImageApplyMode,
+	type AiImageJobRecoveryOptions,
 	type AiImageJobRunner,
+	type AiImageResultPreview,
 	type UseAiImageOptions,
 	type UseAiImageResult,
 	useAiImage,

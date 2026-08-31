@@ -17,8 +17,12 @@ import {
 import { isValidElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { createAiJobClient } from "../../job/index.js";
+import {
+	createAiImageJobSessionCoordinator,
+	createAiJobClient,
+} from "../../job/index.js";
 import { createMockAiImageProvider } from "../../mock/index.js";
+import { createAiImageTelemetry } from "../../telemetry/index.js";
 import type {
 	AiDesignJobResult,
 	AiImageJobResult,
@@ -230,6 +234,171 @@ describe("useAiImage", () => {
 			expect(result.current.result?.resultAssetId).toBe("mock-asset"),
 		);
 	});
+
+	it("recovers a job result after the panel closes and remounts", async () => {
+		let resolveRun: ((value: AiImageJobResult) => void) | undefined;
+		const run = vi.fn<AiImageJobRunner>(
+			() =>
+				new Promise((resolve) => {
+					resolveRun = resolve;
+				}),
+		);
+		const coordinator = createAiImageJobSessionCoordinator();
+		const jobSession = {
+			documentId: "doc-a",
+			coordinator,
+			requiresNetwork: false,
+		};
+		const first = renderHook(() =>
+			useAiImage({ run, getLayerContext: ARTBOARD, jobSession }),
+		);
+		act(() => first.result.current.onPromptChange("a cat"));
+		act(() => first.result.current.onRun());
+		expect(coordinator.get("doc-a")?.status).toBe("pending");
+		first.unmount();
+
+		await act(async () => {
+			resolveRun?.(completeResult("recovered-asset"));
+		});
+		expect(coordinator.get("doc-a")?.status).toBe("complete");
+
+		const remounted = renderHook(() =>
+			useAiImage({ run, getLayerContext: ARTBOARD, jobSession }),
+		);
+		await waitFor(() =>
+			expect(remounted.result.current.preview?.result.resultAssetId).toBe(
+				"recovered-asset",
+			),
+		);
+		expect(remounted.result.current.prompt).toBe("a cat");
+	});
+
+	it("disables network jobs while offline and all jobs after permission revocation", () => {
+		const coordinator = createAiImageJobSessionCoordinator();
+		const offline = renderHook(() =>
+			useAiImage({
+				run: vi.fn(),
+				getLayerContext: ARTBOARD,
+				jobSession: {
+					documentId: "doc-offline",
+					coordinator,
+					requiresNetwork: true,
+					online: false,
+				},
+			}),
+		);
+		act(() => offline.result.current.onPromptChange("a cat"));
+		expect(offline.result.current.canRun).toBe(false);
+		expect(offline.result.current.runDisabledReason).toMatch(/Reconnect/);
+
+		const denied = renderHook(() =>
+			useAiImage({
+				run: vi.fn(),
+				getLayerContext: ARTBOARD,
+				jobSession: {
+					documentId: "doc-denied",
+					coordinator,
+					permissionGranted: false,
+				},
+			}),
+		);
+		act(() => denied.result.current.onPromptChange("a cat"));
+		expect(denied.result.current.canRun).toBe(false);
+		expect(denied.result.current.runDisabledReason).toMatch(/owner/);
+	});
+
+	it("fails closed when provider safety blocks a completed result", async () => {
+		const run = vi.fn<AiImageJobRunner>().mockResolvedValue({
+			...completeResult("unsafe-result"),
+			metadata: {
+				safety: {
+					status: "blocked",
+					code: "POLICY_BLOCKED",
+					message: "The provider blocked this output.",
+				},
+			},
+		});
+		const applyResult = vi.fn();
+		const { result } = renderHook(() =>
+			useAiImage({
+				run,
+				getLayerContext: ARTBOARD,
+				applyResult,
+			}),
+		);
+		act(() => result.current.onPromptChange("unsafe request"));
+		act(() => result.current.onRun());
+
+		await waitFor(() =>
+			expect(result.current.jobError).toMatchObject({
+				code: "POLICY_BLOCKED",
+				category: "provider-policy",
+			}),
+		);
+		expect(result.current.preview).toBeNull();
+		expect(result.current.result).toBeNull();
+		expect(result.current.canInsertCopy).toBe(false);
+		expect(applyResult).not.toHaveBeenCalled();
+	});
+
+	it("emits content-free lifecycle and discard telemetry", async () => {
+		let clock = 100;
+		let resolveRun: ((value: AiImageJobResult) => void) | undefined;
+		const run = vi.fn<AiImageJobRunner>(
+			() =>
+				new Promise((resolve) => {
+					resolveRun = resolve;
+				}),
+		);
+		const emit = vi.fn();
+		const telemetry = createAiImageTelemetry({ emit });
+		const { result } = renderHook(() =>
+			useAiImage({
+				run,
+				getLayerContext: ARTBOARD,
+				telemetry,
+				now: () => clock,
+			}),
+		);
+		act(() => result.current.onPromptChange("private launch image"));
+		act(() => result.current.onRun());
+		clock = 125;
+		await act(async () => resolveRun?.(completeResult("private-asset-id")));
+		await waitFor(() => expect(result.current.preview).not.toBeNull());
+		clock = 130;
+		act(() => result.current.onDiscard());
+
+		expect(emit.mock.calls.map((call) => call[0])).toEqual([
+			{
+				name: "ai_image_task",
+				phase: "started",
+				taskKind: "text-to-image",
+				timestamp: 100,
+				retryCount: 0,
+			},
+			{
+				name: "ai_image_task",
+				phase: "finished",
+				taskKind: "text-to-image",
+				timestamp: 125,
+				durationMs: 25,
+				outcome: "success",
+				retryCount: 0,
+			},
+			{
+				name: "ai_image_task",
+				phase: "decision",
+				taskKind: "text-to-image",
+				timestamp: 130,
+				durationMs: 30,
+				retryCount: 0,
+				decision: "discard",
+			},
+		]);
+		const serialized = JSON.stringify(emit.mock.calls);
+		expect(serialized).not.toContain("private launch image");
+		expect(serialized).not.toContain("private-asset-id");
+	});
 });
 
 function completeDesignResult(): AiDesignJobResult {
@@ -399,7 +568,7 @@ describe("useAiImage — image.replace commit", () => {
 		selectedNodeId: "node-1",
 	});
 
-	it("commits image.replace when a variation completes against a selected node", async () => {
+	it("holds a variation result for review, then commits on explicit replace", async () => {
 		const run = vi
 			.fn<AiImageJobRunner>()
 			.mockResolvedValue(completeResult("ai-out"));
@@ -413,6 +582,10 @@ describe("useAiImage — image.replace commit", () => {
 		await act(async () => {
 			result.current.onRun();
 		});
+		await waitFor(() => expect(result.current.preview).not.toBeNull());
+		expect(commit).not.toHaveBeenCalled();
+
+		act(() => result.current.onApply("replace"));
 		await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
 
 		expect(commit.mock.calls[0]?.[0]).toEqual({
@@ -443,7 +616,7 @@ describe("useAiImage — image.replace commit", () => {
 		expect(commit).not.toHaveBeenCalled();
 	});
 
-	it("commits the post-processed asset id when postProcess is provided", async () => {
+	it("post-processes only after the user explicitly applies the preview", async () => {
 		const run = vi
 			.fn<AiImageJobRunner>()
 			.mockResolvedValue(completeResult("raw"));
@@ -463,6 +636,11 @@ describe("useAiImage — image.replace commit", () => {
 		await act(async () => {
 			result.current.onRun();
 		});
+		await waitFor(() => expect(result.current.preview).not.toBeNull());
+		expect(postProcess).not.toHaveBeenCalled();
+		expect(commit).not.toHaveBeenCalled();
+
+		act(() => result.current.onApply("replace"));
 		await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
 
 		expect(postProcess).toHaveBeenCalledTimes(1);
@@ -474,7 +652,7 @@ describe("useAiImage — image.replace commit", () => {
 		});
 	});
 
-	it("commits image.replace when an upscale completes against a selected node", async () => {
+	it("commits an upscale only after the preview is accepted", async () => {
 		const run = vi
 			.fn<AiImageJobRunner>()
 			.mockResolvedValue(completeResult("ai-out"));
@@ -490,6 +668,10 @@ describe("useAiImage — image.replace commit", () => {
 		await act(async () => {
 			result.current.onRun();
 		});
+		await waitFor(() => expect(result.current.preview).not.toBeNull());
+		expect(commit).not.toHaveBeenCalled();
+
+		act(() => result.current.onApply("replace"));
 		await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
 
 		expect(run.mock.calls[0]?.[0]).toEqual({
@@ -541,8 +723,32 @@ describe("useAiImage — image.replace commit", () => {
 		await act(async () => {
 			result.current.onRun();
 		});
+		await waitFor(() => expect(result.current.preview).not.toBeNull());
+		expect(result.current.error).toBeNull();
+
+		act(() => result.current.onApply("replace"));
 		await waitFor(() => expect(result.current.error).toBe("commit boom"));
 		expect(result.current.status).toBe("idle");
+	});
+
+	it("discards a preview without mutating the canvas", async () => {
+		const run = vi
+			.fn<AiImageJobRunner>()
+			.mockResolvedValue(completeResult("ai-out"));
+		const commit = vi.fn();
+		const { result } = renderHook(() =>
+			useAiImage({ run, getLayerContext: ARTBOARD_WITH_NODE, commit }),
+		);
+		act(() => result.current.onOpChange("variation"));
+		act(() => result.current.onSourceAssetIdChange("src-1"));
+		act(() => result.current.onRun());
+
+		await waitFor(() => expect(result.current.preview).not.toBeNull());
+		act(() => result.current.onDiscard());
+
+		expect(result.current.preview).toBeNull();
+		expect(result.current.result).toBeNull();
+		expect(commit).not.toHaveBeenCalled();
 	});
 });
 
@@ -816,6 +1022,85 @@ describe("AiImagePanel", () => {
 			),
 		);
 		expect(run).toHaveBeenCalledTimes(2);
+	});
+
+	it("shows an original/result comparison and waits for explicit replace", async () => {
+		const run = vi
+			.fn<AiImageJobRunner>()
+			.mockResolvedValue(completeResult("ai-out"));
+		const commit = vi.fn();
+		render(
+			<AiImagePanel
+				jobClient={fakeJobClient(run)}
+				getLayerContext={ARTBOARD_WITH_IMAGE}
+				defaultOp="bg-remove"
+				commit={commit}
+				resolveAssetUrl={(assetId) => `data:image/png,${assetId}`}
+			/>,
+		);
+
+		fireEvent.click(screen.getByTestId("ai-image-run"));
+		await waitFor(() =>
+			expect(screen.getByTestId("ai-image-preview")).toBeInTheDocument(),
+		);
+		expect(screen.getByTestId("ai-image-preview-original")).toHaveAttribute(
+			"src",
+			"data:image/png,selected-asset",
+		);
+		expect(screen.getByTestId("ai-image-preview-result")).toHaveAttribute(
+			"src",
+			"data:image/png,ai-out",
+		);
+		expect(commit).not.toHaveBeenCalled();
+
+		fireEvent.click(screen.getByTestId("ai-image-preview-replace"));
+		await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
+		expect(screen.queryByTestId("ai-image-preview")).toBeNull();
+	});
+
+	it("supports insert-as-copy through the host adapter and nondestructive discard", async () => {
+		const run = vi
+			.fn<AiImageJobRunner>()
+			.mockResolvedValue(completeResult("ai-out"));
+		const applyResult = vi.fn().mockResolvedValue(undefined);
+		const { rerender } = render(
+			<AiImagePanel
+				jobClient={fakeJobClient(run)}
+				getLayerContext={ARTBOARD}
+				applyResult={applyResult}
+			/>,
+		);
+		fireEvent.change(screen.getByTestId("ai-image-prompt"), {
+			target: { value: "a cat" },
+		});
+		fireEvent.click(screen.getByTestId("ai-image-run"));
+		await waitFor(() =>
+			expect(screen.getByTestId("ai-image-preview")).toBeInTheDocument(),
+		);
+
+		fireEvent.click(screen.getByTestId("ai-image-preview-insert-copy"));
+		await waitFor(() => expect(applyResult).toHaveBeenCalledTimes(1));
+		expect(applyResult.mock.calls[0]?.[1]).toBe("insert-copy");
+
+		rerender(
+			<AiImagePanel
+				jobClient={fakeJobClient(run)}
+				getLayerContext={ARTBOARD}
+				applyResult={applyResult}
+			/>,
+		);
+		fireEvent.change(screen.getByTestId("ai-image-prompt"), {
+			target: { value: "a second cat" },
+		});
+		fireEvent.click(screen.getByTestId("ai-image-run"));
+		await waitFor(() =>
+			expect(
+				screen.getByTestId("ai-image-preview-discard"),
+			).toBeInTheDocument(),
+		);
+		fireEvent.click(screen.getByTestId("ai-image-preview-discard"));
+		expect(screen.queryByTestId("ai-image-preview")).toBeNull();
+		expect(applyResult).toHaveBeenCalledTimes(1);
 	});
 });
 
