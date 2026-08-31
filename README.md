@@ -21,6 +21,14 @@ optional React sidebar panel) as separate subpath exports.
 > contribute lifecycle hooks or UI on its own. Mount the panel via
 > `@anvilkit/plugin-ai-image/react` (or wire your own UI on top of `useAiImage`).
 
+PLAN-0039 E7 adds the complete product workflow around those primitives:
+provider capability/limit discovery, progress and structured retry, explicit
+original/result review, atomic replace or insert-copy, document-scoped recovery,
+permission/connectivity handling, provider-policy fail-closed behavior,
+host-bounded prompt retention, content-free telemetry, and deterministic image
+quality fixtures. A completed provider job never mutates the document until the
+user accepts its preview.
+
 ## Scope decision: this package fulfills the PRD's `@anvilkit/canvas-ai` role
 
 **Decision (canvas-m4-002, FR-051): no new `@anvilkit/canvas-ai` package.**
@@ -108,6 +116,21 @@ const result = await aiImage.submit(
 - **Abort / retry / poll job client** — `createAiJobClient` wraps a provider with
   transient-failure retry (exponential backoff + jitter) and optional polling for
   async jobs that return `status: "pending"`.
+- **Recoverable, nondestructive review** — `useAiImage` and `AiImagePanel` keep
+  completed output in an original/result preview with explicit Replace, Insert
+  as copy, and Discard decisions. The `@anvilkit/plugin-ai-image/job-session`
+  entry keeps jobs alive across panel closure, isolates documents, restores
+  safe reload state, and invalidates work on connectivity or permission changes.
+- **Safety and privacy boundaries** — blocked/review-required provider outcomes
+  cannot be previewed or applied. Storage adapters redact prompts and provider
+  detail; in-memory prompt retention follows the host TTL. The bundle-isolated
+  `@anvilkit/plugin-ai-image/telemetry` entry emits only task kind, duration,
+  outcome, retry count, and apply/discard state.
+- **Quality evaluation fixtures** — the bundle-isolated
+  `@anvilkit/plugin-ai-image/evaluation` entry exports
+  `AI_IMAGE_QUALITY_FIXTURES` and `evaluateAiImageQualityFixture` for transparent
+  edges, boundary objects, embedded typography, faces, and generative-expansion
+  seams without adding fixture bytes to the runtime plugin entry.
 - **Mask editor** — `MaskEditorLayer` + `useMaskStrokes` capture brush strokes on a
   Konva layer; the exporter rasterizes them to a mask asset for inpaint jobs.
 - **Post-processing pipeline** — normalize → validate MIME → validate size →
@@ -292,12 +315,15 @@ function createAiImageSidebarPlugin(
 ): StudioPlugin;
 ```
 
-- **`AiImagePanel`** — the generation UI (op selector, prompt fields, run/cancel).
-  Driven by a `jobClient`, a `getLayerContext` accessor, an optional `defaultOp`,
-  and injectable i18n `labels`.
+- **`AiImagePanel`** — the generation UI (provider-driven tasks and constraints,
+  prompt fields/examples, progress/cancel/retry, structured errors, and
+  original/result review with replace/insert-copy/discard). Driven by a
+  `jobClient`, a `getLayerContext` accessor, an optional `defaultOp`, and
+  injectable i18n `labels`.
 - **`useAiImage`** — headless panel-state hook returning field values, change
-  handlers, and `onRun` / `onCancel`. Wire it to your own UI when `AiImagePanel`'s
-  chrome doesn't fit.
+  handlers, lifecycle actions, and explicit preview decisions. Optional
+  `jobSession` and `telemetry` adapters add recovery and content-free reporting.
+  Wire it to your own UI when `AiImagePanel`'s chrome doesn't fit.
 - **`createAiImageSidebarPlugin`** — self-registering plugin that mounts
   `AiImagePanel` into the Studio sidebar's `copilot` module. Options:
 
